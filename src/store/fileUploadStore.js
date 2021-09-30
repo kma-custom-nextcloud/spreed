@@ -23,15 +23,16 @@
 import Vue from 'vue'
 import client from '../services/DavClient'
 import { showError } from '@nextcloud/dialogs'
-import { loadState } from '@nextcloud/initial-state'
-import { findUniquePath } from '../utils/fileUpload'
-import createTemporaryMessage from '../utils/temporaryMessage'
+import fromStateOr from './helper'
+import { findUniquePath, getFileExtension } from '../utils/fileUpload'
+import moment from '@nextcloud/moment'
 import { EventBus } from '../services/EventBus'
 import { shareFile } from '../services/filesSharingServices'
+import { setAttachmentFolder } from '../services/settingsService'
 
 const state = {
-	attachmentFolder: loadState('spreed', 'attachment_folder'),
-	attachmentFolderFreeSpace: loadState('spreed', 'attachment_folder_free_space'),
+	attachmentFolder: fromStateOr('spreed', 'attachment_folder', ''),
+	attachmentFolderFreeSpace: fromStateOr('spreed', 'attachment_folder_free_space', 0),
 	uploads: {
 	},
 	currentUploadId: undefined,
@@ -169,31 +170,49 @@ const mutations = {
 		state.currentUploadId = currentUploadId
 	},
 
-	removeFileFromSelection(state, fileId) {
+	removeFileFromSelection(state, temporaryMessageId) {
 		const uploadId = state.currentUploadId
 		for (const key in state.uploads[uploadId].files) {
-			if (state.uploads[uploadId].files[key].temporaryMessage.id === fileId) {
+			if (state.uploads[uploadId].files[key].temporaryMessage.id === temporaryMessageId) {
 				Vue.delete(state.uploads[uploadId].files, key)
 			}
 		}
 	},
 
-	discardUpload(state, uploadId) {
+	discardUpload(state, { uploadId }) {
 		Vue.delete(state.uploads, uploadId)
 	},
 }
 
 const actions = {
 
-	initialiseUpload({ commit, dispatch }, { uploadId, token, files }) {
+	/**
+	 * Initialises uploads and shares files to a conversation
+	 *
+	 * @param {object} files the files to be processed
+	 * @param {string} token the conversation's token where to share the files
+	 * @param {number} uploadId a unique id for the upload operation indexing
+	 * @param {bool} rename whether to rename the files (usually after pasting)
+	 */
+	async initialiseUpload({ commit, dispatch }, { uploadId, token, files, rename = false, isVoiceMessage }) {
 		// Set last upload id
 		commit('setCurrentUploadId', uploadId)
 
-		files.forEach(file => {
+		for (let i = 0; i < files.length; i++) {
+			const file = files[i]
+
+			if (rename) {
+				// note: can't overwrite the original read-only name attribute
+				file.newName = moment(file.lastModified || file.lastModifiedDate).format('YYYYMMDD_HHmmss')
+					+ getFileExtension(file.name)
+			}
+
 			// Get localurl for some image previews
 			let localUrl = ''
 			if (file.type === 'image/png' || file.type === 'image/gif' || file.type === 'image/jpeg') {
 				localUrl = URL.createObjectURL(file)
+			} else if (isVoiceMessage) {
+				localUrl = file.localUrl
 			} else {
 				localUrl = OC.MimeType.getIconUrl(file.type)
 			}
@@ -201,10 +220,12 @@ const actions = {
 			const date = new Date()
 			const index = 'temp_' + date.getTime() + Math.random()
 			// Create temporary message for the file and add it to the message list
-			const temporaryMessage = createTemporaryMessage('{file}', token, uploadId, index, file, localUrl)
+			const temporaryMessage = await dispatch('createTemporaryMessage', {
+				text: '{file}', token, uploadId, index, file, localUrl, isVoiceMessage,
+			})
 			console.debug('temporarymessage: ', temporaryMessage, 'uploadId', uploadId)
 			commit('addFileToBeUploaded', { file, temporaryMessage })
-		})
+		}
 	},
 
 	/**
@@ -257,29 +278,38 @@ const actions = {
 			const uniquePath = await findUniquePath(client, userRoot, path)
 			try {
 				// Upload the file
-				await client.putFileContents(userRoot + uniquePath, currentFile, { onUploadProgress: progress => {
-					const uploadedSize = progress.loaded
-					commit('setUploadedSize', { state, uploadId, index, uploadedSize })
-				} })
+				await client.putFileContents(userRoot + uniquePath, currentFile, {
+					onUploadProgress: progress => {
+						const uploadedSize = progress.loaded
+						commit('setUploadedSize', { state, uploadId, index, uploadedSize })
+					},
+					contentLength: currentFile.size,
+				})
 				// Path for the sharing request
 				const sharePath = '/' + uniquePath
 				// Mark the file as uploaded in the store
 				commit('markFileAsSuccessUpload', { uploadId, index, sharePath })
 			} catch (exception) {
-				console.error(`Error while uploading file "${fileName}":` + exception, fileName, exception.response.status)
-				const temporaryMessage = state.uploads[uploadId].files[index].temporaryMessage
 				let reason = 'failed-upload'
-				if (exception.response.status === 507) {
-					reason = 'quota'
-					showError(t('spreed', 'Not enough free space to upload file "{fileName}"', { fileName }))
+				if (exception.response) {
+					console.error(`Error while uploading file "${fileName}":` + exception, fileName, exception.response.status)
+					if (exception.response.status === 507) {
+						reason = 'quota'
+						showError(t('spreed', 'Not enough free space to upload file "{fileName}"', { fileName }))
+					} else {
+						showError(t('spreed', 'Error while uploading file "{fileName}"', { fileName }))
+					}
 				} else {
+					console.error(`Error while uploading file "${fileName}":` + exception.message, fileName)
 					showError(t('spreed', 'Error while uploading file "{fileName}"', { fileName }))
 				}
+
+				const temporaryMessage = state.uploads[uploadId].files[index].temporaryMessage
 				// Mark the upload as failed in the store
 				commit('markFileAsFailedUpload', { uploadId, index })
 				dispatch('markTemporaryMessageAsFailed', {
 					message: temporaryMessage,
-					reason: reason,
+					reason,
 				})
 			}
 
@@ -288,14 +318,24 @@ const actions = {
 			// Share each of those files to the conversation
 			for (const index in shareableFiles) {
 				const path = shareableFiles[index].sharePath
+				const temporaryMessage = shareableFiles[index].temporaryMessage
+				const metadata = JSON.stringify({ messageType: temporaryMessage.messageType })
 				try {
-					const temporaryMessage = shareableFiles[index].temporaryMessage
 					const token = temporaryMessage.token
 					dispatch('markFileAsSharing', { uploadId, index })
-					await shareFile(path, token, temporaryMessage.referenceId)
+					await shareFile(path, token, temporaryMessage.referenceId, metadata)
 					dispatch('markFileAsShared', { uploadId, index })
-				} catch (exception) {
-					console.debug('An error happened when trying to share your file: ', exception)
+				} catch (error) {
+					if (error?.response?.status === 403) {
+						showError(t('spreed', 'You are not allowed to share files'))
+					} else {
+						showError(t('spreed', 'An error happened when trying to share your file'))
+					}
+					dispatch('markTemporaryMessageAsFailed', {
+						message: temporaryMessage,
+						reason: 'failed-share',
+					})
+					console.error('An error happened when trying to share your file: ', error)
 				}
 			}
 		}
@@ -307,7 +347,8 @@ const actions = {
 	 * @param {object} context default store context;
 	 * @param {string} attachmentFolder Folder to store new attachments in
 	 */
-	setAttachmentFolder(context, attachmentFolder) {
+	async setAttachmentFolder(context, attachmentFolder) {
+		await setAttachmentFolder(attachmentFolder)
 		context.commit('setAttachmentFolder', attachmentFolder)
 	},
 
@@ -333,8 +374,13 @@ const actions = {
 		context.commit('markFileAsShared', { uploadId, index })
 	},
 
-	removeFileFromSelection({ commit }, fileId) {
-		commit('removeFileFromSelection', fileId)
+	/**
+	 * Mark a file as shared
+	 * @param {object} context default store context;
+	 * @param {string} temporaryMessageId message id of the temporary message associated to the file to remove
+	 */
+	removeFileFromSelection({ commit }, temporaryMessageId) {
+		commit('removeFileFromSelection', temporaryMessageId)
 	},
 
 }

@@ -51,7 +51,12 @@ export const ATTENDEE = {
 		USERS: 'users',
 		GUESTS: 'guests',
 		EMAILS: 'emails',
+		GROUPS: 'groups',
+		CIRCLES: 'circles',
+		BOTS: 'bots',
 	},
+	BRIDGE_BOT_ID: 'bridge-bot',
+	CHANGELOG_BOT_ID: 'changelog',
 }
 export const PARTICIPANT = {
 	CALL_FLAG: {
@@ -80,6 +85,13 @@ export const PARTICIPANT = {
 		GUEST: 4,
 		USER_SELF_JOINED: 5,
 		GUEST_MODERATOR: 6,
+	},
+	PUBLISHING_PERMISSIONS: {
+		NONE: 0,
+		AUDIO: 1,
+		VIDEO: 2,
+		SCREENSHARING: 4,
+		ALL: 7,
 	},
 }
 export const WEBINAR = {
@@ -111,4 +123,9 @@ export const FLOW = {
 export const PRIVACY = {
 	PUBLIC: 0,
 	PRIVATE: 1,
+}
+export const SIMULCAST = {
+	LOW: 0,
+	MEDIUM: 1,
+	HIGH: 2,
 }

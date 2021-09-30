@@ -20,7 +20,11 @@
 -->
 
 <template>
-	<AppSettingsDialog :open.sync="showSettings" :show-navigation="true" first-selected-section="keyboard shortcuts">
+	<AppSettingsDialog
+		:open.sync="showSettings"
+		:show-navigation="true"
+		first-selected-section="keyboard shortcuts"
+		:container="container">
 		<AppSettingsSection :title="t('spreed', 'Choose devices')"
 			class="app-settings-section">
 			<MediaDevicesPreview />
@@ -50,8 +54,20 @@
 				@change="toggleReadStatusPrivacy">
 			<label for="read_status_privacy">{{ t('spreed', 'Share my read-status and show the read-status of others') }}</label>
 		</AppSettingsSection>
+		<AppSettingsSection
+			:title="t('spreed', 'Sounds')"
+			class="app-settings-section">
+			<input id="play_sounds"
+				:checked="playSounds"
+				:disabled="playSoundsLoading"
+				type="checkbox"
+				class="checkbox"
+				@change="togglePlaySounds">
+			<label for="play_sounds">{{ t('spreed', 'Play sounds when participants join or leave a call') }}</label>
+			<em>{{ t('spreed', 'Sounds can currently not be played in Safari browser and iPad and iPhone devices due to technical restrictions by the manufacturer.') }}</em>
+		</AppSettingsSection>
 		<AppSettingsSection :title="t('spreed', 'Keyboard shortcuts')">
-			<p>{{ t('spreed', 'Speed up your Talk experience with these quick shortcuts.') }}</p>
+			<em>{{ t('spreed', 'Speed up your Talk experience with these quick shortcuts.') }}</em>
 
 			<dl>
 				<div>
@@ -113,7 +129,6 @@
 
 <script>
 import { getFilePickerBuilder, showError, showSuccess } from '@nextcloud/dialogs'
-import { setAttachmentFolder } from '../../services/settingsService'
 import { PRIVACY } from '../../constants'
 import { subscribe, unsubscribe } from '@nextcloud/event-bus'
 import MediaDevicesPreview from '../MediaDevicesPreview'
@@ -134,16 +149,25 @@ export default {
 			showSettings: false,
 			attachmentFolderLoading: true,
 			privacyLoading: false,
+			playSoundsLoading: false,
 		}
 	},
 
 	computed: {
+		container() {
+			return this.$store.getters.getMainContainerSelector()
+		},
+
+		playSounds() {
+			return this.$store.getters.playSounds
+		},
+
 		attachmentFolder() {
 			return this.$store.getters.getAttachmentFolder()
 		},
 
 		locationHint() {
-			return t('spreed', 'Choose in which folder attachments should be saved.')
+			return t('spreed', 'Choose the folder in which attachments should be saved.')
 		},
 
 		isGuest() {
@@ -182,14 +206,11 @@ export default {
 						throw new Error(t('spreed', 'Invalid path selected'))
 					}
 
-					const oldFolder = this.attachmentFolder
 					this.attachmentFolderLoading = true
 					try {
-						this.$store.commit('setAttachmentFolder', path)
-						await setAttachmentFolder(path)
+						this.$store.dispatch('setAttachmentFolder', path)
 					} catch (exception) {
 						showError(t('spreed', 'Error while setting attachment folder'))
-						this.$store.commit('setAttachmentFolder', oldFolder)
 					}
 					this.attachmentFolderLoading = false
 				})
@@ -207,6 +228,21 @@ export default {
 				showError(t('spreed', 'Error while setting read status privacy'))
 			}
 			this.privacyLoading = false
+		},
+
+		async togglePlaySounds() {
+			this.playSoundsLoading = true
+			try {
+				try {
+					await this.$store.dispatch('setPlaySounds', !this.playSounds)
+				} catch (e) {
+					showError(t('spreed', 'Failed to save sounds setting'))
+				}
+				showSuccess(t('spreed', 'Sounds setting saved'))
+			} catch (exception) {
+				showError(t('spreed', 'Error while saving sounds setting'))
+			}
+			this.playSoundsLoading = false
 		},
 
 		handleShowSettings() {

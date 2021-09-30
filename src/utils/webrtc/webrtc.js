@@ -34,6 +34,7 @@ import {
 	TOAST_PERMANENT_TIMEOUT,
 	TOAST_DEFAULT_TIMEOUT,
 } from '@nextcloud/dialogs'
+import { Sounds } from '../sounds.js'
 
 let webrtc
 const spreedPeerConnectionTable = []
@@ -71,6 +72,7 @@ function createScreensharingPeer(signaling, sessionId) {
 			type: 'screen',
 			sharemyscreen: true,
 			enableDataChannels: false,
+			enableSimulcast: signaling.hasFeature('simulcast'),
 			receiveMedia: {
 				offerToReceiveAudio: 0,
 				offerToReceiveVideo: 0,
@@ -105,6 +107,7 @@ function createScreensharingPeer(signaling, sessionId) {
 				type: 'screen',
 				sharemyscreen: true,
 				enableDataChannels: false,
+				enableSimulcast: signaling.hasFeature('simulcast'),
 				receiveMedia: {
 					offerToReceiveAudio: 0,
 					offerToReceiveVideo: 0,
@@ -143,6 +146,7 @@ function checkStartPublishOwnPeer(signaling) {
 			id: currentSessionId,
 			type: 'video',
 			enableDataChannels: true,
+			enableSimulcast: signaling.hasFeature('simulcast'),
 			receiveMedia: {
 				offerToReceiveAudio: 0,
 				offerToReceiveVideo: 0,
@@ -218,7 +222,7 @@ function sendCurrentStateWithRepetition(timeout) {
 
 function userHasStreams(user) {
 	let flags = user
-	if (flags.hasOwnProperty('inCall')) {
+	if (Object.prototype.hasOwnProperty.call(flags, 'inCall')) {
 		flags = flags.inCall
 	}
 	flags = flags || PARTICIPANT.CALL_FLAG.DISCONNECTED
@@ -235,6 +239,9 @@ function usersChanged(signaling, newUsers, disconnectedSessionIds) {
 		checkStartPublishOwnPeer(signaling)
 	}
 
+	let playJoinSound = false
+	let playLeaveSound = false
+
 	newUsers.forEach(function(user) {
 		if (!user.inCall) {
 			return
@@ -243,6 +250,9 @@ function usersChanged(signaling, newUsers, disconnectedSessionIds) {
 		// TODO(fancycode): Adjust property name of internal PHP backend to be all lowercase.
 		const sessionId = user.sessionId || user.sessionid
 		if (!sessionId || sessionId === currentSessionId || previousUsersInRoom.indexOf(sessionId) !== -1) {
+			if (sessionId === currentSessionId && previousUsersInRoom.indexOf(sessionId) !== -1) {
+				Sounds.playJoin(true, newUsers.length === 1)
+			}
 			return
 		}
 
@@ -294,11 +304,14 @@ function usersChanged(signaling, newUsers, disconnectedSessionIds) {
 			}
 		}
 
+		playJoinSound = true
+
 		const createPeer = function() {
 			const peer = webrtc.webrtc.createPeer({
 				id: sessionId,
 				type: 'video',
 				enableDataChannels: true,
+				enableSimulcast: signaling.hasFeature('simulcast'),
 				receiveMedia: {
 					offerToReceiveAudio: 1,
 					offerToReceiveVideo: 1,
@@ -358,17 +371,32 @@ function usersChanged(signaling, newUsers, disconnectedSessionIds) {
 	disconnectedSessionIds.forEach(function(sessionId) {
 		console.debug('Remove disconnected peer', sessionId)
 		webrtc.removePeers(sessionId)
-		callParticipantCollection.remove(sessionId)
+
+		if (callParticipantCollection.remove(sessionId)) {
+			playLeaveSound = true
+		}
+
 		if (delayedConnectionToPeer[sessionId]) {
 			clearInterval(delayedConnectionToPeer[sessionId])
 			delete delayedConnectionToPeer[sessionId]
+			playLeaveSound = true
 		}
 	})
 
 	previousUsersInRoom = arrayDiff(previousUsersInRoom, disconnectedSessionIds)
+
+	if (selfInCall !== PARTICIPANT.CALL_FLAG.DISCONNECTED) {
+		if (playJoinSound) {
+			Sounds.playJoin()
+		} else if (playLeaveSound) {
+			Sounds.playLeave(false, previousUsersInRoom.length === 0)
+		}
+	}
 }
 
 function usersInCallChanged(signaling, users) {
+	const previousSelfInCall = selfInCall
+
 	// The passed list are the users that are currently in the room,
 	// i.e. that are in the call and should call each other.
 	const currentSessionId = signaling.getSessionId()
@@ -377,7 +405,7 @@ function usersInCallChanged(signaling, users) {
 	selfInCall = PARTICIPANT.CALL_FLAG.DISCONNECTED
 	let sessionId
 	for (sessionId in users) {
-		if (!users.hasOwnProperty(sessionId)) {
+		if (!Object.prototype.hasOwnProperty.call(users, sessionId)) {
 			continue
 		}
 		const user = users[sessionId]
@@ -394,7 +422,15 @@ function usersInCallChanged(signaling, users) {
 		userMapping[sessionId] = user
 	}
 
-	if (!selfInCall) {
+	if (previousSelfInCall === PARTICIPANT.CALL_FLAG.DISCONNECTED
+		&& selfInCall !== PARTICIPANT.CALL_FLAG.DISCONNECTED) {
+		Sounds.playJoin(true, Object.keys(userMapping).length === 0)
+	} else if (previousSelfInCall !== PARTICIPANT.CALL_FLAG.DISCONNECTED
+		&& selfInCall === PARTICIPANT.CALL_FLAG.DISCONNECTED) {
+		Sounds.playLeave(true)
+	}
+
+	if (selfInCall === PARTICIPANT.CALL_FLAG.DISCONNECTED) {
 		// Own session is no longer in the call, disconnect from all others.
 		usersChanged(signaling, [], previousUsersInRoom)
 		return
@@ -411,7 +447,7 @@ function usersInCallChanged(signaling, users) {
 	}
 }
 
-export default function initWebRTC(signaling, _callParticipantCollection, _localCallParticipantModel) {
+export default function initWebRtc(signaling, _callParticipantCollection, _localCallParticipantModel) {
 	callParticipantCollection = _callParticipantCollection
 	localCallParticipantModel = _localCallParticipantModel
 
@@ -464,6 +500,7 @@ export default function initWebRTC(signaling, _callParticipantCollection, _local
 		}
 
 		clearErrorNotification()
+		Sounds.playLeave(true)
 
 		// The delayed connection for the own peer needs to be explicitly
 		// stopped, as the current own session is not passed along with the
@@ -527,22 +564,14 @@ export default function initWebRTC(signaling, _callParticipantCollection, _local
 		remoteVideosEl: '',
 		autoRequestMedia: true,
 		debug: false,
-		media: {
-			audio: true,
-			video: true,
-		},
 		autoAdjustMic: false,
 		audioFallback: true,
 		detectSpeakingEvents: true,
 		connection: signaling,
 		enableDataChannels: true,
+		enableSimulcast: signaling.hasFeature('simulcast'),
 		nick: store.getters.getDisplayName(),
 	})
-	if (signaling.hasFeature('mcu')) {
-		// Force "Plan-B" semantics if the MCU is used, which doesn't support
-		// "Unified Plan" with SimpleWebRTC yet.
-		webrtc.webrtc.config.peerConnectionConfig.sdpSemantics = 'plan-b'
-	}
 
 	if (!window.OCA.Talk) {
 		window.OCA.Talk = {}
@@ -559,10 +588,17 @@ export default function initWebRTC(signaling, _callParticipantCollection, _local
 		webrtc.leaveCall()
 	})
 
-	webrtc.startMedia = function(token) {
+	webrtc.startMedia = function(token, flags) {
 		startedWithMedia = undefined
 
-		webrtc.joinCall(token)
+		// If no flags are provided try to enable both audio and video.
+		// Otherwise, try to enable only that allowed by the flags.
+		const mediaConstraints = {
+			audio: !flags || !!(flags & PARTICIPANT.CALL_FLAG.WITH_AUDIO),
+			video: !flags || !!(flags & PARTICIPANT.CALL_FLAG.WITH_VIDEO),
+		}
+
+		webrtc.joinCall(token, mediaConstraints)
 	}
 
 	const sendDataChannelToAll = function(channel, message, payload) {
@@ -695,6 +731,27 @@ export default function initWebRTC(signaling, _callParticipantCollection, _local
 		})
 	}
 
+	function setHandlerForConnectionStateChange(peer) {
+		peer.pc.addEventListener('connectionstatechange', function() {
+			if (peer.pc.connectionState !== 'failed') {
+				return
+			}
+
+			if (peer.pc.iceConnectionState === 'failed') {
+				return
+			}
+
+			// Work around Chromium bug where "iceConnectionState" never changes
+			// to "failed" (it stays as "disconnected"). When that happens
+			// "connectionState" actually does change to "failed", so the normal
+			// handling of "iceConnectionState === failed" is triggered here.
+
+			peer.emit('extendedIceConnectionStateChange', peer.pc.connectionState)
+
+			handleIceConnectionStateFailed(peer)
+		})
+	}
+
 	function setHandlerForOwnIceConnectionStateChange(peer) {
 		peer.pc.addEventListener('iceconnectionstatechange', function() {
 			peer.emit('extendedIceConnectionStateChange', peer.pc.iceConnectionState)
@@ -761,10 +818,121 @@ export default function initWebRTC(signaling, _callParticipantCollection, _local
 			// is established, but forcing a reconnection should be done only
 			// once the connection was established.
 			if (peer.pc.iceConnectionState !== 'new' && peer.pc.iceConnectionState !== 'checking') {
-				forceReconnect(signaling)
+				// Update the media flags if needed, as the renegotiation could
+				// have been caused by tracks being added or removed.
+				const audioSender = peer.pc.getSenders().find((sender) => sender.track && sender.track.kind === 'audio')
+				const videoSender = peer.pc.getSenders().find((sender) => sender.track && sender.track.kind === 'video')
+
+				let flags = signaling.getCurrentCallFlags()
+				if (audioSender) {
+					flags |= PARTICIPANT.CALL_FLAG.WITH_AUDIO
+				} else {
+					flags &= ~PARTICIPANT.CALL_FLAG.WITH_AUDIO
+				}
+				if (videoSender) {
+					flags |= PARTICIPANT.CALL_FLAG.WITH_VIDEO
+				} else {
+					flags &= ~PARTICIPANT.CALL_FLAG.WITH_VIDEO
+				}
+
+				// Negotiation is expected to be needed only when a new track is
+				// added to or removed from a peer. Therefore if the HPB is used
+				// the negotiation will be needed in the own peer, but if the
+				// HPB is not used it will be needed in all peers. However, in
+				// that case as soon as the forced reconnection is triggered all
+				// the peers will be cleared, so in practice there will be just
+				// one forced reconnection even if there are several peers.
+				// FIXME: despite all of the above this is a dirty and ugly hack
+				// that should be fixed with proper renegotiation.
+				forceReconnect(signaling, flags)
 			}
 		})
 	}
+
+	const reconnectOnPublishingPermissionsChange = (users) => {
+		const currentParticipant = users.find(user => {
+			const sessionId = user.sessionId || user.sessionid
+			return sessionId === signaling.getSessionId()
+		})
+
+		if (!currentParticipant) {
+			return
+		}
+
+		if (!currentParticipant.inCall) {
+			return
+		}
+
+		if (currentParticipant.publishingPermissions === undefined) {
+			return
+		}
+
+		if (currentParticipant.publishingPermissions === PARTICIPANT.PUBLISHING_PERMISSIONS.ALL && webrtc.webrtc.isLocalMediaActive()) {
+			return
+		}
+
+		if (currentParticipant.publishingPermissions === PARTICIPANT.PUBLISHING_PERMISSIONS.NONE && !webrtc.webrtc.isLocalMediaActive()) {
+			return
+		}
+
+		if (currentParticipant.publishingPermissions === PARTICIPANT.PUBLISHING_PERMISSIONS.NONE) {
+			startedWithMedia = undefined
+
+			webrtc.stopLocalVideo()
+
+			// If the MCU is used and there is no sending peer there is no need
+			// to force a reconnection, as there will be no connection that
+			// needs to be stopped.
+			if (!signaling.hasFeature('mcu') || ownPeer) {
+				forceReconnect(signaling, PARTICIPANT.CALL_FLAG.IN_CALL)
+			}
+
+			return
+		}
+
+		const forceReconnectOnceLocalMediaStarted = (constraints) => {
+			webrtc.off('localMediaStarted', forceReconnectOnceLocalMediaStarted)
+			webrtc.off('localMediaError', forceReconnectOnceLocalMediaError)
+
+			startedWithMedia = true
+
+			let flags = PARTICIPANT.CALL_FLAG.IN_CALL
+			if (constraints) {
+				if (constraints.audio) {
+					flags |= PARTICIPANT.CALL_FLAG.WITH_AUDIO
+				}
+				if (constraints.video && signaling.getSendVideoIfAvailable()) {
+					flags |= PARTICIPANT.CALL_FLAG.WITH_VIDEO
+				}
+			}
+
+			forceReconnect(signaling, flags)
+		}
+		const forceReconnectOnceLocalMediaError = () => {
+			webrtc.off('localMediaStarted', forceReconnectOnceLocalMediaStarted)
+			webrtc.off('localMediaError', forceReconnectOnceLocalMediaError)
+
+			startedWithMedia = false
+
+			// If the media fails to start there will be no media, so no need to
+			// reconnect. A reconnection will happen once the user selects a
+			// different device.
+		}
+
+		webrtc.on('localMediaStarted', forceReconnectOnceLocalMediaStarted)
+		webrtc.on('localMediaError', forceReconnectOnceLocalMediaError)
+
+		startedWithMedia = undefined
+
+		webrtc.startLocalVideo()
+	}
+
+	signaling.on('usersInRoom', function(users) {
+		reconnectOnPublishingPermissionsChange(users)
+	})
+	signaling.on('usersChanged', function(users) {
+		reconnectOnPublishingPermissionsChange(users)
+	})
 
 	webrtc.on('createdPeer', function(peer) {
 		console.debug('Peer created', peer)
@@ -792,6 +960,7 @@ export default function initWebRTC(signaling, _callParticipantCollection, _local
 				setHandlerForOwnIceConnectionStateChange(peer)
 			} else {
 				setHandlerForIceConnectionStateChange(peer)
+				setHandlerForConnectionStateChange(peer)
 			}
 
 			setHandlerForNegotiationNeeded(peer)
@@ -809,7 +978,7 @@ export default function initWebRTC(signaling, _callParticipantCollection, _local
 			peer.pc.getStats(track).then(function(stats) {
 				let result = false
 				stats.forEach(function(statsReport) {
-					if (result || statsReport.mediaType !== mediaType || !statsReport.hasOwnProperty('bytesReceived')) {
+					if (result || statsReport.mediaType !== mediaType || !Object.prototype.hasOwnProperty.call(statsReport, 'bytesReceived')) {
 						return
 					}
 
@@ -989,16 +1158,34 @@ export default function initWebRTC(signaling, _callParticipantCollection, _local
 		}
 	})
 
-	webrtc.on('localTrackReplaced', function(newTrack /*, oldTrack, stream */) {
-		// Device disabled, nothing to do here.
+	webrtc.on('localTrackReplaced', function(newTrack, oldTrack/*, stream */) {
+		// Device disabled, just update the call flags.
 		if (!newTrack) {
+			if (oldTrack && oldTrack.kind === 'audio') {
+				signaling.updateCurrentCallFlags(signaling.getCurrentCallFlags() & ~PARTICIPANT.CALL_FLAG.WITH_AUDIO)
+			} else if (oldTrack && oldTrack.kind === 'video') {
+				signaling.updateCurrentCallFlags(signaling.getCurrentCallFlags() & ~PARTICIPANT.CALL_FLAG.WITH_VIDEO)
+			}
+
 			return
 		}
 
 		// If the call was started with media the connections will be already
-		// established. If it has not started yet the connections will be
-		// established once started.
-		if (startedWithMedia || startedWithMedia === undefined) {
+		// established. The flags need to be updated if a device was enabled
+		// (but not if it was switched to another one).
+		if (startedWithMedia) {
+			if (newTrack.kind === 'audio' && !oldTrack) {
+				signaling.updateCurrentCallFlags(signaling.getCurrentCallFlags() | PARTICIPANT.CALL_FLAG.WITH_AUDIO)
+			} else if (newTrack.kind === 'video' && !oldTrack) {
+				signaling.updateCurrentCallFlags(signaling.getCurrentCallFlags() | PARTICIPANT.CALL_FLAG.WITH_VIDEO)
+			}
+
+			return
+		}
+
+		// If the call has not started with media yet the connections will be
+		// established once started, as well as the flags.
+		if (startedWithMedia === undefined) {
 			return
 		}
 
@@ -1065,7 +1252,7 @@ export default function initWebRTC(signaling, _callParticipantCollection, _local
 		}
 
 		errorNotificationHandle = showError(message, {
-			timeout: timeout,
+			timeout,
 		})
 	})
 
@@ -1085,7 +1272,7 @@ export default function initWebRTC(signaling, _callParticipantCollection, _local
 				webrtc.emit('mute', { id: peer.id, name: 'video' })
 			} else if (data.type === 'nickChanged') {
 				const name = typeof (data.payload) === 'string' ? data.payload : data.payload.name
-				webrtc.emit('nick', { id: peer.id, name: name })
+				webrtc.emit('nick', { id: peer.id, name })
 			} else if (data.type === 'speaking' || data.type === 'stoppedSpeaking') {
 				// Valid known messages, but handled elsewhere
 			} else {
@@ -1093,6 +1280,38 @@ export default function initWebRTC(signaling, _callParticipantCollection, _local
 			}
 		} else {
 			console.debug('Unknown message from %s datachannel', label, data)
+		}
+	})
+
+	webrtc.on('sendToAll', function(messageType, payload) {
+		const sessionIdsForParticipantsWithPeers = {}
+		webrtc.webrtc.peers.forEach(peer => {
+			sessionIdsForParticipantsWithPeers[peer.id] = peer
+		})
+
+		// "webrtc.sendToAll" only sends the signaling message to participants
+		// for which there is a Peer object. Therefore the message needs to be
+		// explicitly sent here too to participants without audio and video.
+		for (const sessionId in usersInCallMapping) {
+			if (sessionIdsForParticipantsWithPeers[sessionId]) {
+				continue
+			} else if (!usersInCallMapping[sessionId].inCall) {
+				continue
+			} else if (sessionId === signaling.getSessionId()) {
+				continue
+			}
+
+			// "roomType" is not really relevant without a peer, but it is
+			// nevertheless expected in the message. As the signaling messages
+			// currently sent to all participants are related to video peers
+			// "video" is used as the room type.
+			const message = {
+				to: sessionId,
+				roomType: 'video',
+				type: messageType,
+				payload,
+			}
+			signaling.emit('message', message)
 		}
 	})
 
@@ -1133,40 +1352,21 @@ export default function initWebRTC(signaling, _callParticipantCollection, _local
 			payload = name
 		} else {
 			payload = {
-				'name': name,
-				'userid': signaling.settings.userId,
+				name,
+				userid: signaling.settings.userId,
 			}
 		}
 
 		sendDataChannelToAll('status', 'nickChanged', payload)
 
-		// "webrtc.sendToAll" can not be used, as it only sends the signaling
-		// message to participants for which there is a Peer object, so the
-		// message may not be sent to participants without audio and video.
-		for (const sessionId in usersInCallMapping) {
-			if (!usersInCallMapping[sessionId].inCall) {
-				continue
-			} else if (sessionId === signaling.getSessionId()) {
-				continue
-			}
-
-			const message = {
-				to: sessionId,
-				roomType: 'video',
-				type: 'nickChanged',
-				payload: {
-					name: name,
-				},
-			}
-			signaling.emit('message', message)
-		}
+		webrtc.sendToAll('nickChanged', { name })
 	})
 
 	// Local screen added.
 	webrtc.on('localScreenAdded', function(/* video */) {
 		const currentSessionId = signaling.getSessionId()
 		for (const sessionId in usersInCallMapping) {
-			if (!usersInCallMapping.hasOwnProperty(sessionId)) {
+			if (!Object.prototype.hasOwnProperty.call(usersInCallMapping, sessionId)) {
 				continue
 			} else if (!usersInCallMapping[sessionId].inCall) {
 				continue

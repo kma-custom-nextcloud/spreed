@@ -42,25 +42,25 @@ export default function LocalCallParticipantModel() {
 
 LocalCallParticipantModel.prototype = {
 
-	get: function(key) {
+	get(key) {
 		return this.attributes[key]
 	},
 
-	set: function(key, value) {
+	set(key, value) {
 		this.attributes[key] = value
 
 		this._trigger('change:' + key, [value])
 	},
 
-	on: function(event, handler) {
-		if (!this._handlers.hasOwnProperty(event)) {
+	on(event, handler) {
+		if (!Object.prototype.hasOwnProperty.call(this._handlers, event)) {
 			this._handlers[event] = [handler]
 		} else {
 			this._handlers[event].push(handler)
 		}
 	},
 
-	off: function(event, handler) {
+	off(event, handler) {
 		const handlers = this._handlers[event]
 		if (!handlers) {
 			return
@@ -72,7 +72,7 @@ LocalCallParticipantModel.prototype = {
 		}
 	},
 
-	_trigger: function(event, args) {
+	_trigger(event, args) {
 		let handlers = this._handlers[event]
 		if (!handlers) {
 			return
@@ -91,7 +91,7 @@ LocalCallParticipantModel.prototype = {
 		}
 	},
 
-	setWebRtc: function(webRtc) {
+	setWebRtc(webRtc) {
 		if (this._webRtc) {
 			this._webRtc.off('forcedMute', this._handleForcedMuteBound)
 			this._unwatchDisplayNameChange()
@@ -106,7 +106,7 @@ LocalCallParticipantModel.prototype = {
 		this._unwatchDisplayNameChange = store.watch(state => state.actorStore.displayName, this.setGuestName.bind(this))
 	},
 
-	setPeer: function(peer) {
+	setPeer(peer) {
 		if (peer && this.get('peerId') !== peer.id) {
 			console.warn('Mismatch between stored peer ID and ID of given peer: ', this.get('peerId'), peer.id)
 		}
@@ -124,12 +124,18 @@ LocalCallParticipantModel.prototype = {
 		}
 
 		// Reset state that depends on the Peer object.
-		this._handleExtendedIceConnectionStateChange(this.get('peer').pc.iceConnectionState)
+		if (this.get('peer').pc.connectionState === 'failed' && this.get('peer').pc.iceConnectionState === 'disconnected') {
+			// Work around Chromium bug where "iceConnectionState" gets stuck as
+			// "disconnected" even if the connection already failed.
+			this._handleExtendedIceConnectionStateChange(this.get('peer').pc.connectionState)
+		} else {
+			this._handleExtendedIceConnectionStateChange(this.get('peer').pc.iceConnectionState)
+		}
 
 		this.get('peer').on('extendedIceConnectionStateChange', this._handleExtendedIceConnectionStateChangeBound)
 	},
 
-	setScreenPeer: function(screenPeer) {
+	setScreenPeer(screenPeer) {
 		if (screenPeer && this.get('peerId') !== screenPeer.id) {
 			console.warn('Mismatch between stored peer ID and ID of given screen peer: ', this.get('peerId'), screenPeer.id)
 		}
@@ -137,7 +143,7 @@ LocalCallParticipantModel.prototype = {
 		this.set('screenPeer', screenPeer)
 	},
 
-	setGuestName: function(guestName) {
+	setGuestName(guestName) {
 		if (!this._webRtc) {
 			throw new Error('WebRtc not initialized yet')
 		}
@@ -147,11 +153,11 @@ LocalCallParticipantModel.prototype = {
 		this._webRtc.webrtc.emit('nickChanged', guestName)
 	},
 
-	_handleForcedMute: function() {
+	_handleForcedMute() {
 		this._trigger('forcedMute')
 	},
 
-	_handleExtendedIceConnectionStateChange: function(extendedIceConnectionState) {
+	_handleExtendedIceConnectionStateChange(extendedIceConnectionState) {
 		switch (extendedIceConnectionState) {
 		case 'new':
 			this.set('connectionState', ConnectionState.NEW)

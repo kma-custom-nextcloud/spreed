@@ -98,6 +98,7 @@ export default {
 				|| this.isBlockedByLobby
 				|| this.conversation.readOnly
 				|| this.isNextcloudTalkHashDirty
+				|| !this.currentConversationIsJoined
 		},
 
 		leaveCallLabel() {
@@ -164,6 +165,10 @@ export default {
 			return this.conversation.readOnly === CONVERSATION.STATE.READ_WRITE
 				&& this.isInCall
 		},
+
+		currentConversationIsJoined() {
+			return this.$store.getters.currentConversationIsJoined
+		},
 	},
 
 	methods: {
@@ -172,6 +177,11 @@ export default {
 		},
 
 		async joinCall() {
+			let flags = PARTICIPANT.CALL_FLAG.IN_CALL
+			if (this.conversation.publishingPermissions === PARTICIPANT.PUBLISHING_PERMISSIONS.ALL) {
+				flags |= PARTICIPANT.CALL_FLAG.WITH_AUDIO | PARTICIPANT.CALL_FLAG.WITH_VIDEO
+			}
+
 			console.info('Joining call')
 			this.loading = true
 			// Close navigation
@@ -181,7 +191,7 @@ export default {
 			await this.$store.dispatch('joinCall', {
 				token: this.token,
 				participantIdentifier: this.$store.getters.getParticipantIdentifier(),
-				flags: PARTICIPANT.CALL_FLAG.IN_CALL, // FIXME add audio+video as per setting
+				flags,
 			})
 			this.loading = false
 		},

@@ -69,6 +69,7 @@ class SelectHelper {
 			->addSelect($alias . 'last_read_message')
 			->addSelect($alias . 'last_mention_message')
 			->addSelect($alias . 'read_privacy')
+			->addSelect($alias . 'publishing_permissions')
 			->selectAlias($alias . 'id', 'a_id');
 	}
 
@@ -82,5 +83,18 @@ class SelectHelper {
 			->addSelect($alias . 'in_call')
 			->addSelect($alias . 'last_ping')
 			->selectAlias($alias . 'id', 's_id');
+	}
+
+	public function selectSessionsTableMax(IQueryBuilder $query, string $alias = 's'): void {
+		if ($alias !== '') {
+			$alias .= '.';
+		}
+
+		$query->selectAlias($query->func()->max($alias . 'attendee_id'), 'attendee_id')
+			->selectAlias($query->func()->max($alias . 'session_id'), 'session_id')
+			// BIT_OR would be better, but SQLite does not support something like it.
+			->selectAlias($query->func()->max($alias . 'in_call'), 'in_call')
+			->selectAlias($query->func()->max($alias . 'last_ping'), 'last_ping')
+			->selectAlias($query->func()->max($alias . 'id'), 's_id');
 	}
 }

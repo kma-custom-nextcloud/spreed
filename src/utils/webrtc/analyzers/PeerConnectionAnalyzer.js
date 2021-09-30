@@ -73,59 +73,59 @@ const PEER_DIRECTION = {
  */
 function PeerConnectionAnalyzer() {
 	this._packets = {
-		'audio': new AverageStatValue(5, STAT_VALUE_TYPE.CUMULATIVE),
-		'video': new AverageStatValue(5, STAT_VALUE_TYPE.CUMULATIVE),
+		audio: new AverageStatValue(5, STAT_VALUE_TYPE.CUMULATIVE),
+		video: new AverageStatValue(5, STAT_VALUE_TYPE.CUMULATIVE),
 	}
 	this._packetsLost = {
-		'audio': new AverageStatValue(5, STAT_VALUE_TYPE.CUMULATIVE),
-		'video': new AverageStatValue(5, STAT_VALUE_TYPE.CUMULATIVE),
+		audio: new AverageStatValue(5, STAT_VALUE_TYPE.CUMULATIVE),
+		video: new AverageStatValue(5, STAT_VALUE_TYPE.CUMULATIVE),
 	}
 	this._packetsLostRatio = {
-		'audio': new AverageStatValue(5, STAT_VALUE_TYPE.RELATIVE),
-		'video': new AverageStatValue(5, STAT_VALUE_TYPE.RELATIVE),
+		audio: new AverageStatValue(5, STAT_VALUE_TYPE.RELATIVE),
+		video: new AverageStatValue(5, STAT_VALUE_TYPE.RELATIVE),
 	}
 	this._packetsPerSecond = {
-		'audio': new AverageStatValue(5, STAT_VALUE_TYPE.RELATIVE),
-		'video': new AverageStatValue(5, STAT_VALUE_TYPE.RELATIVE),
+		audio: new AverageStatValue(5, STAT_VALUE_TYPE.RELATIVE),
+		video: new AverageStatValue(5, STAT_VALUE_TYPE.RELATIVE),
 	}
 	// Latest values have a higher weight than the default one to better detect
 	// sudden changes in the round trip time, which can lead to discarded (but
 	// not lost) packets.
 	this._roundTripTime = {
-		'audio': new AverageStatValue(5, STAT_VALUE_TYPE.RELATIVE, 5),
-		'video': new AverageStatValue(5, STAT_VALUE_TYPE.RELATIVE, 5),
+		audio: new AverageStatValue(5, STAT_VALUE_TYPE.RELATIVE, 5),
+		video: new AverageStatValue(5, STAT_VALUE_TYPE.RELATIVE, 5),
 	}
 	// Only the last relative value is used, but as it is a cumulative value the
 	// previous one is needed as a base to calculate the last one.
 	this._timestamps = {
-		'audio': new AverageStatValue(2, STAT_VALUE_TYPE.CUMULATIVE),
-		'video': new AverageStatValue(2, STAT_VALUE_TYPE.CUMULATIVE),
+		audio: new AverageStatValue(2, STAT_VALUE_TYPE.CUMULATIVE),
+		video: new AverageStatValue(2, STAT_VALUE_TYPE.CUMULATIVE),
 	}
 	this._timestampsForLogs = {
-		'audio': new AverageStatValue(5, STAT_VALUE_TYPE.CUMULATIVE),
-		'video': new AverageStatValue(5, STAT_VALUE_TYPE.CUMULATIVE),
+		audio: new AverageStatValue(5, STAT_VALUE_TYPE.CUMULATIVE),
+		video: new AverageStatValue(5, STAT_VALUE_TYPE.CUMULATIVE),
 	}
 
 	this._stagedPackets = {
-		'audio': [],
-		'video': [],
+		audio: [],
+		video: [],
 	}
 	this._stagedPacketsLost = {
-		'audio': [],
-		'video': [],
+		audio: [],
+		video: [],
 	}
 	this._stagedRoundTripTime = {
-		'audio': [],
-		'video': [],
+		audio: [],
+		video: [],
 	}
 	this._stagedTimestamps = {
-		'audio': [],
-		'video': [],
+		audio: [],
+		video: [],
 	}
 
 	this._analysisEnabled = {
-		'audio': true,
-		'video': true,
+		audio: true,
+		video: true,
 	}
 
 	this._handlers = []
@@ -136,24 +136,25 @@ function PeerConnectionAnalyzer() {
 	this._getStatsInterval = null
 
 	this._handleIceConnectionStateChangedBound = this._handleIceConnectionStateChanged.bind(this)
+	this._handleConnectionStateChangedBound = this._handleConnectionStateChanged.bind(this)
 	this._processStatsBound = this._processStats.bind(this)
 
 	this._connectionQuality = {
-		'audio': CONNECTION_QUALITY.UNKNOWN,
-		'video': CONNECTION_QUALITY.UNKNOWN,
+		audio: CONNECTION_QUALITY.UNKNOWN,
+		video: CONNECTION_QUALITY.UNKNOWN,
 	}
 }
 PeerConnectionAnalyzer.prototype = {
 
-	on: function(event, handler) {
-		if (!this._handlers.hasOwnProperty(event)) {
+	on(event, handler) {
+		if (!Object.prototype.hasOwnProperty.call(this._handlers, event)) {
 			this._handlers[event] = [handler]
 		} else {
 			this._handlers[event].push(handler)
 		}
 	},
 
-	off: function(event, handler) {
+	off(event, handler) {
 		const handlers = this._handlers[event]
 		if (!handlers) {
 			return
@@ -165,7 +166,7 @@ PeerConnectionAnalyzer.prototype = {
 		}
 	},
 
-	_trigger: function(event, args) {
+	_trigger(event, args) {
 		let handlers = this._handlers[event]
 		if (!handlers) {
 			return
@@ -180,35 +181,36 @@ PeerConnectionAnalyzer.prototype = {
 		}
 	},
 
-	getConnectionQualityAudio: function() {
-		return this._connectionQuality['audio']
+	getConnectionQualityAudio() {
+		return this._connectionQuality.audio
 	},
 
-	getConnectionQualityVideo: function() {
-		return this._connectionQuality['video']
+	getConnectionQualityVideo() {
+		return this._connectionQuality.video
 	},
 
-	_setConnectionQualityAudio: function(connectionQualityAudio) {
-		if (this._connectionQuality['audio'] === connectionQualityAudio) {
+	_setConnectionQualityAudio(connectionQualityAudio) {
+		if (this._connectionQuality.audio === connectionQualityAudio) {
 			return
 		}
 
-		this._connectionQuality['audio'] = connectionQualityAudio
+		this._connectionQuality.audio = connectionQualityAudio
 		this._trigger('change:connectionQualityAudio', [connectionQualityAudio])
 	},
 
-	_setConnectionQualityVideo: function(connectionQualityVideo) {
-		if (this._connectionQuality['video'] === connectionQualityVideo) {
+	_setConnectionQualityVideo(connectionQualityVideo) {
+		if (this._connectionQuality.video === connectionQualityVideo) {
 			return
 		}
 
-		this._connectionQuality['video'] = connectionQualityVideo
+		this._connectionQuality.video = connectionQualityVideo
 		this._trigger('change:connectionQualityVideo', [connectionQualityVideo])
 	},
 
-	setPeerConnection: function(peerConnection, peerDirection = null) {
+	setPeerConnection(peerConnection, peerDirection = null) {
 		if (this._peerConnection) {
 			this._peerConnection.removeEventListener('iceconnectionstatechange', this._handleIceConnectionStateChangedBound)
+			this._peerConnection.removeEventListener('connectionstatechange', this._handleConnectionStateChangedBound)
 			this._stopGetStatsInterval()
 		}
 
@@ -220,16 +222,17 @@ PeerConnectionAnalyzer.prototype = {
 
 		if (this._peerConnection) {
 			this._peerConnection.addEventListener('iceconnectionstatechange', this._handleIceConnectionStateChangedBound)
+			this._peerConnection.addEventListener('connectionstatechange', this._handleConnectionStateChangedBound)
 			this._handleIceConnectionStateChangedBound()
 		}
 	},
 
-	setAnalysisEnabledAudio: function(analysisEnabledAudio) {
-		if (this._analysisEnabled['audio'] === analysisEnabledAudio) {
+	setAnalysisEnabledAudio(analysisEnabledAudio) {
+		if (this._analysisEnabled.audio === analysisEnabledAudio) {
 			return
 		}
 
-		this._analysisEnabled['audio'] = analysisEnabledAudio
+		this._analysisEnabled.audio = analysisEnabledAudio
 
 		if (!analysisEnabledAudio) {
 			this._setConnectionQualityAudio(CONNECTION_QUALITY.UNKNOWN)
@@ -238,12 +241,12 @@ PeerConnectionAnalyzer.prototype = {
 		}
 	},
 
-	setAnalysisEnabledVideo: function(analysisEnabledVideo) {
-		if (this._analysisEnabled['video'] === analysisEnabledVideo) {
+	setAnalysisEnabledVideo(analysisEnabledVideo) {
+		if (this._analysisEnabled.video === analysisEnabledVideo) {
 			return
 		}
 
-		this._analysisEnabled['video'] = analysisEnabledVideo
+		this._analysisEnabled.video = analysisEnabledVideo
 
 		if (!analysisEnabledVideo) {
 			this._setConnectionQualityVideo(CONNECTION_QUALITY.UNKNOWN)
@@ -252,7 +255,7 @@ PeerConnectionAnalyzer.prototype = {
 		}
 	},
 
-	_resetStats: function(kind) {
+	_resetStats(kind) {
 		this._packets[kind].reset()
 		this._packetsLost[kind].reset()
 		this._packetsLostRatio[kind].reset()
@@ -261,11 +264,14 @@ PeerConnectionAnalyzer.prototype = {
 		this._timestampsForLogs[kind].reset()
 	},
 
-	_handleIceConnectionStateChanged: function() {
+	_handleIceConnectionStateChanged() {
 		// Note that even if the ICE connection state is "disconnected" the
 		// connection is actually active, media is still transmitted, and the
 		// stats are properly updated.
-		if (!this._peerConnection || (this._peerConnection.iceConnectionState !== 'connected' && this._peerConnection.iceConnectionState !== 'completed' && this._peerConnection.iceConnectionState !== 'disconnected')) {
+		// "connectionState === failed" needs to be checked due to a Chromium
+		// bug in which "iceConnectionState" can get stuck as "disconnected"
+		// even if the connection has already failed.
+		if (!this._peerConnection || (this._peerConnection.iceConnectionState !== 'connected' && this._peerConnection.iceConnectionState !== 'completed' && this._peerConnection.iceConnectionState !== 'disconnected') || this._peerConnection.connectionState === 'failed') {
 			this._setConnectionQualityAudio(CONNECTION_QUALITY.UNKNOWN)
 			this._setConnectionQualityVideo(CONNECTION_QUALITY.UNKNOWN)
 
@@ -295,13 +301,37 @@ PeerConnectionAnalyzer.prototype = {
 		}, 1000)
 	},
 
-	_stopGetStatsInterval: function() {
+	_handleConnectionStateChanged() {
+		if (!this._peerConnection) {
+			return
+		}
+
+		if (this._peerConnection.connectionState !== 'failed') {
+			return
+		}
+
+		if (this._peerConnection.iceConnectionState === 'failed') {
+			return
+		}
+
+		// Work around Chromium bug where "iceConnectionState" never changes
+		// to "failed" (it stays as "disconnected"). When that happens
+		// "connectionState" actually does change to "failed", so the normal
+		// handling of "iceConnectionState === failed" is triggered here.
+
+		this._handleIceConnectionStateChanged()
+	},
+
+	_stopGetStatsInterval() {
 		window.clearInterval(this._getStatsInterval)
 		this._getStatsInterval = null
 	},
 
-	_processStats: function(stats) {
-		if (!this._peerConnection || (this._peerConnection.iceConnectionState !== 'connected' && this._peerConnection.iceConnectionState !== 'completed' && this._peerConnection.iceConnectionState !== 'disconnected')) {
+	_processStats(stats) {
+		// "connectionState === failed" needs to be checked due to a Chromium
+		// bug in which "iceConnectionState" can get stuck as "disconnected"
+		// even if the connection has already failed.
+		if (!this._peerConnection || (this._peerConnection.iceConnectionState !== 'connected' && this._peerConnection.iceConnectionState !== 'completed' && this._peerConnection.iceConnectionState !== 'disconnected') || this._peerConnection.connectionState === 'failed') {
 			return
 		}
 
@@ -311,32 +341,32 @@ PeerConnectionAnalyzer.prototype = {
 			this._processReceiverStats(stats)
 		}
 
-		if (this._analysisEnabled['audio']) {
+		if (this._analysisEnabled.audio) {
 			this._setConnectionQualityAudio(this._calculateConnectionQualityAudio())
 		}
-		if (this._analysisEnabled['video']) {
+		if (this._analysisEnabled.video) {
 			this._setConnectionQualityVideo(this._calculateConnectionQualityVideo())
 		}
 	},
 
-	_processSenderStats: function(stats) {
+	_processSenderStats(stats) {
 		// Packets are calculated as "packetsReceived + packetsLost" or as
 		// "packetsSent" depending on the browser (see below).
 		const packets = {
-			'audio': -1,
-			'video': -1,
+			audio: -1,
+			video: -1,
 		}
 
 		// Packets stats for a sender are checked from the point of view of the
 		// receiver.
 		const packetsReceived = {
-			'audio': -1,
-			'video': -1,
+			audio: -1,
+			video: -1,
 		}
 
 		const packetsLost = {
-			'audio': -1,
-			'video': -1,
+			audio: -1,
+			video: -1,
 		}
 
 		// If "packetsReceived" is not available (like in Chromium) use
@@ -344,30 +374,30 @@ PeerConnectionAnalyzer.prototype = {
 		// the received statistics, so checking "packetsLost" against it may not
 		// be fully accurate, but it should be close enough.
 		const packetsSent = {
-			'audio': -1,
-			'video': -1,
+			audio: -1,
+			video: -1,
 		}
 
 		// Timestamp is set to "timestampReceived" or "timestampSent" depending
 		// on how "packets" were calculated.
 		const timestamp = {
-			'audio': -1,
-			'video': -1,
+			audio: -1,
+			video: -1,
 		}
 
 		const timestampReceived = {
-			'audio': -1,
-			'video': -1,
+			audio: -1,
+			video: -1,
 		}
 
 		const timestampSent = {
-			'audio': -1,
-			'video': -1,
+			audio: -1,
+			video: -1,
 		}
 
 		const roundTripTime = {
-			'audio': -1,
-			'video': -1,
+			audio: -1,
+			video: -1,
 		}
 
 		for (const stat of stats.values()) {
@@ -423,26 +453,26 @@ PeerConnectionAnalyzer.prototype = {
 		}
 	},
 
-	_processReceiverStats: function(stats) {
+	_processReceiverStats(stats) {
 		// Packets are calculated as "packetsReceived + packetsLost".
 		const packets = {
-			'audio': -1,
-			'video': -1,
+			audio: -1,
+			video: -1,
 		}
 
 		const packetsReceived = {
-			'audio': -1,
-			'video': -1,
+			audio: -1,
+			video: -1,
 		}
 
 		const packetsLost = {
-			'audio': -1,
-			'video': -1,
+			audio: -1,
+			video: -1,
 		}
 
 		const timestamp = {
-			'audio': -1,
-			'video': -1,
+			audio: -1,
+			video: -1,
 		}
 
 		for (const stat of stats.values()) {
@@ -502,7 +532,7 @@ PeerConnectionAnalyzer.prototype = {
 	 * @param {number} timestamp the cumulative timestamp
 	 * @param {number} roundTripTime the relative round trip time
 	 */
-	_addStats: function(kind, packets, packetsLost, timestamp, roundTripTime) {
+	_addStats(kind, packets, packetsLost, timestamp, roundTripTime) {
 		if (this._stagedPackets[kind].length === 0) {
 			if (packets !== this._packets[kind].getLastRawValue()) {
 				this._commitStats(kind, packets, packetsLost, timestamp, roundTripTime)
@@ -531,7 +561,7 @@ PeerConnectionAnalyzer.prototype = {
 		}
 	},
 
-	_stageStats: function(kind, packets, packetsLost, timestamp, roundTripTime) {
+	_stageStats(kind, packets, packetsLost, timestamp, roundTripTime) {
 		this._stagedPackets[kind].push(packets)
 		this._stagedPacketsLost[kind].push(packetsLost)
 		this._stagedTimestamps[kind].push(timestamp)
@@ -550,7 +580,7 @@ PeerConnectionAnalyzer.prototype = {
 	 *
 	 * @param {string} kind the type of the stats ("audio" or "video")
 	 */
-	_distributeStagedStats: function(kind) {
+	_distributeStagedStats(kind) {
 		let packetsBase = this._packets[kind].getLastRawValue()
 		let packetsLostBase = this._packetsLost[kind].getLastRawValue()
 		let timestampsBase = this._timestamps[kind].getLastRawValue()
@@ -589,7 +619,7 @@ PeerConnectionAnalyzer.prototype = {
 		}
 	},
 
-	_commitStats: function(kind, packets, packetsLost, timestamp, roundTripTime) {
+	_commitStats(kind, packets, packetsLost, timestamp, roundTripTime) {
 		if (packets >= 0) {
 			this._packets[kind].add(packets)
 		}
@@ -626,15 +656,15 @@ PeerConnectionAnalyzer.prototype = {
 		}
 	},
 
-	_calculateConnectionQualityAudio: function() {
+	_calculateConnectionQualityAudio() {
 		return this._calculateConnectionQuality('audio')
 	},
 
-	_calculateConnectionQualityVideo: function() {
+	_calculateConnectionQualityVideo() {
 		return this._calculateConnectionQuality('video')
 	},
 
-	_calculateConnectionQuality: function(kind) {
+	_calculateConnectionQuality(kind) {
 		const packetsLostRatio = this._packetsLostRatio[kind]
 		const packetsPerSecond = this._packetsPerSecond[kind]
 		const roundTripTime = this._roundTripTime[kind]
@@ -701,7 +731,7 @@ PeerConnectionAnalyzer.prototype = {
 		return CONNECTION_QUALITY.GOOD
 	},
 
-	_logStats: function(kind, message) {
+	_logStats(kind, message) {
 		const tag = 'PeerConnectionAnalyzer: ' + kind + ': '
 
 		if (message) {

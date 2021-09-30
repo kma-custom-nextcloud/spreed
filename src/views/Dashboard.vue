@@ -27,22 +27,23 @@
 		:loading="loading"
 		:show-items-and-empty-content="!hasImportantConversations"
 		:half-empty-content-message="t('spreed', 'No unread mentions')">
-		<template v-slot:default="{ item }">
+		<template #default="{ item }">
 			<DashboardWidgetItem
 				:target-url="getItemTargetUrl(item)"
 				:main-text="getMainText(item)"
 				:sub-text="getSubText(item)"
 				:item="item"
 				v-on="handlers">
-				<template v-slot:avatar>
+				<template #avatar>
 					<ConversationIcon
 						:item="item"
 						:hide-favorite="true"
-						:hide-call="false" />
+						:hide-call="false"
+						:disable-menu="true" />
 				</template>
 			</DashboardWidgetItem>
 		</template>
-		<template v-slot:empty-content>
+		<template #empty-content>
 			<EmptyContent icon="icon-talk">
 				<template #desc>
 					{{ t('spreed', 'Say hi to your friends and colleagues!') }}
@@ -84,6 +85,7 @@ export default {
 			roomOptions: [],
 			hasImportantConversations: false,
 			loading: true,
+			windowVisibility: true,
 		}
 	},
 
@@ -145,15 +147,32 @@ export default {
 		},
 	},
 
+	watch: {
+		windowVisibility(newValue) {
+			if (newValue) {
+				this.fetchRooms()
+			}
+		},
+	},
+
+	beforeDestroy() {
+		document.removeEventListener('visibilitychange', this.changeWindowVisibility)
+	},
+
 	beforeMount() {
 		this.fetchRooms()
-		// FIXME: reduce interval if user not active
-		setInterval(() => this.fetchRooms(), ROOM_POLLING_INTERVAL * 1000)
+		setInterval(this.fetchRooms, ROOM_POLLING_INTERVAL * 1000)
+		document.addEventListener('visibilitychange', this.changeWindowVisibility)
 	},
 
 	methods: {
 		fetchRooms() {
-			axios.get(generateOcsUrl('apps/spreed/api/v2', 2) + 'room').then((response) => {
+			if (!this.windowVisibility) {
+				// Dashboard is not visible, so don't update the room list
+				return
+			}
+
+			axios.get(generateOcsUrl('apps/spreed/api/v4/room')).then((response) => {
 				const rooms = response.data.ocs.data
 				const importantRooms = rooms.filter((conversation) => {
 					return conversation.hasCall
@@ -172,6 +191,10 @@ export default {
 
 				this.loading = false
 			})
+		},
+
+		changeWindowVisibility() {
+			this.windowVisibility = !document.hidden
 		},
 
 		clickStartNew() {

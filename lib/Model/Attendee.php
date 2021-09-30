@@ -33,9 +33,8 @@ use OCP\AppFramework\Db\Entity;
  * @method void setActorId(string $actorId)
  * @method string getActorId()
  * @method void setDisplayName(string $displayName)
- * @method string getDisplayName()
  * @method void setPin(string $pin)
- * @method string getPin()
+ * @method null|string getPin()
  * @method void setParticipantType(int $participantType)
  * @method int getParticipantType()
  * @method void setFavorite(bool $favorite)
@@ -50,11 +49,21 @@ use OCP\AppFramework\Db\Entity;
  * @method int getLastMentionMessage()
  * @method void setReadPrivacy(int $readPrivacy)
  * @method int getReadPrivacy()
+ * @method void setPublishingPermissions(int $publishingPermissions)
+ * @method int getPublishingPermissions()
  */
 class Attendee extends Entity {
 	public const ACTOR_USERS = 'users';
+	public const ACTOR_GROUPS = 'groups';
 	public const ACTOR_GUESTS = 'guests';
 	public const ACTOR_EMAILS = 'emails';
+	public const ACTOR_CIRCLES = 'circles';
+
+	public const PUBLISHING_PERMISSIONS_NONE = 0;
+	public const PUBLISHING_PERMISSIONS_AUDIO = 1;
+	public const PUBLISHING_PERMISSIONS_VIDEO = 2;
+	public const PUBLISHING_PERMISSIONS_SCREENSHARING = 4;
+	public const PUBLISHING_PERMISSIONS_ALL = 7;
 
 	/** @var int */
 	protected $roomId;
@@ -65,10 +74,10 @@ class Attendee extends Entity {
 	/** @var string */
 	protected $actorId;
 
-	/** @var string */
+	/** @var null|string */
 	protected $displayName;
 
-	/** @var string */
+	/** @var null|string */
 	protected $pin;
 
 	/** @var int */
@@ -92,6 +101,9 @@ class Attendee extends Entity {
 	/** @var int */
 	protected $readPrivacy;
 
+	/** @var int */
+	protected $publishingPermissions;
+
 	public function __construct() {
 		$this->addType('roomId', 'int');
 		$this->addType('actorType', 'string');
@@ -105,6 +117,11 @@ class Attendee extends Entity {
 		$this->addType('lastReadMessage', 'int');
 		$this->addType('lastMentionMessage', 'int');
 		$this->addType('readPrivacy', 'int');
+		$this->addType('publishingPermissions', 'int');
+	}
+
+	public function getDisplayName(): string {
+		return (string) $this->displayName;
 	}
 
 	/**
@@ -116,7 +133,7 @@ class Attendee extends Entity {
 			'room_id' => $this->getRoomId(),
 			'actor_type' => $this->getActorType(),
 			'actor_id' => $this->getActorId(),
-			// FIXME 'display_name' => $this->getDisplayName(),
+			'display_name' => $this->getDisplayName(),
 			'pin' => $this->getPin(),
 			'participant_type' => $this->getParticipantType(),
 			'favorite' => $this->isFavorite(),
@@ -125,6 +142,7 @@ class Attendee extends Entity {
 			'last_read_message' => $this->getLastReadMessage(),
 			'last_mention_message' => $this->getLastMentionMessage(),
 			'read_privacy' => $this->getReadPrivacy(),
+			'publishing_permissions' => $this->getPublishingPermissions(),
 		];
 	}
 }

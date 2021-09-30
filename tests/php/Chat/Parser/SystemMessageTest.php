@@ -21,6 +21,7 @@
 
 namespace OCA\Talk\Tests\php\Chat\Parser;
 
+use OCA\DAV\CardDAV\PhotoCache;
 use OCA\Talk\Chat\Parser\SystemMessage;
 use OCA\Talk\Exceptions\ParticipantNotFoundException;
 use OCA\Talk\GuestManager;
@@ -36,6 +37,8 @@ use OCP\Files\InvalidPathException;
 use OCP\Files\IRootFolder;
 use OCP\Files\Node;
 use OCP\Files\NotFoundException;
+use OCP\IGroup;
+use OCP\IGroupManager;
 use OCP\IL10N;
 use OCP\IPreview as IPreviewManager;
 use OCP\IURLGenerator;
@@ -53,12 +56,16 @@ class SystemMessageTest extends TestCase {
 
 	/** @var IUserManager|MockObject */
 	protected $userManager;
+	/** @var IGroupManager|MockObject */
+	protected $groupManager;
 	/** @var GuestManager|MockObject */
 	protected $guestManager;
 	/** @var IPreviewManager|MockObject */
 	protected $previewManager;
 	/** @var RoomShareProvider|MockObject */
 	protected $shareProvider;
+	/** @var PhotoCache|MockObject */
+	protected $photoCache;
 	/** @var IRootFolder|MockObject */
 	protected $rootFolder;
 	/** @var IURLGenerator|MockObject */
@@ -70,9 +77,11 @@ class SystemMessageTest extends TestCase {
 		parent::setUp();
 
 		$this->userManager = $this->createMock(IUserManager::class);
+		$this->groupManager = $this->createMock(IGroupManager::class);
 		$this->guestManager = $this->createMock(GuestManager::class);
 		$this->previewManager = $this->createMock(IPreviewManager::class);
 		$this->shareProvider = $this->createMock(RoomShareProvider::class);
+		$this->photoCache = $this->createMock(PhotoCache::class);
 		$this->rootFolder = $this->createMock(IRootFolder::class);
 		$this->url = $this->createMock(IURLGenerator::class);
 		$this->l = $this->createMock(IL10N::class);
@@ -98,9 +107,11 @@ class SystemMessageTest extends TestCase {
 			$mock = $this->getMockBuilder(SystemMessage::class)
 				->setConstructorArgs([
 					$this->userManager,
+					$this->groupManager,
 					$this->guestManager,
 					$this->previewManager,
 					$this->shareProvider,
+					$this->photoCache,
 					$this->rootFolder,
 					$this->url,
 				])
@@ -111,9 +122,11 @@ class SystemMessageTest extends TestCase {
 		}
 		return new SystemMessage(
 			$this->userManager,
+			$this->groupManager,
 			$this->guestManager,
 			$this->previewManager,
 			$this->shareProvider,
+			$this->photoCache,
 			$this->rootFolder,
 			$this->url
 		);
@@ -138,11 +151,11 @@ class SystemMessageTest extends TestCase {
 				['actor' => ['id' => 'actor', 'type' => 'user']],
 			],
 			['description_set', ['newDescription' => 'New description'], 'recipient',
-				'{actor} set the description to "New description"',
+				'{actor} set the description',
 				['actor' => ['id' => 'actor', 'type' => 'user']],
 			],
 			['description_set', ['newDescription' => 'New description'], 'actor',
-				'You set the description to "New description"',
+				'You set the description',
 				['actor' => ['id' => 'actor', 'type' => 'user']],
 			],
 			['description_removed', [], 'recipient',
@@ -242,6 +255,22 @@ class SystemMessageTest extends TestCase {
 			['user_removed', ['user' => 'user'], 'actor',
 				'You removed {user}',
 				['actor' => ['id' => 'actor', 'type' => 'user'], 'user' => ['id' => 'user', 'type' => 'user']],
+			],
+			['group_added', ['group' => 'g1'], 'recipient',
+				'{actor} added group {group}',
+				['actor' => ['id' => 'actor', 'type' => 'user'], 'group' => ['id' => 'g1', 'type' => 'group']],
+			],
+			['group_added', ['group' => 'g1'], 'actor',
+				'You added group {group}',
+				['actor' => ['id' => 'actor', 'type' => 'user'], 'group' => ['id' => 'g1', 'type' => 'group']],
+			],
+			['group_removed', ['group' => 'g1'], 'recipient',
+				'{actor} removed group {group}',
+				['actor' => ['id' => 'actor', 'type' => 'user'], 'group' => ['id' => 'g1', 'type' => 'group']],
+			],
+			['group_removed', ['group' => 'g1'], 'actor',
+				'You removed group {group}',
+				['actor' => ['id' => 'actor', 'type' => 'user'], 'group' => ['id' => 'g1', 'type' => 'group']],
 			],
 			['moderator_promoted', ['user' => 'user'], 'recipient',
 				'{actor} promoted {user} to moderator',
@@ -355,6 +384,34 @@ class SystemMessageTest extends TestCase {
 				'You opened the conversation to registered and guest app users',
 				['actor' => ['id' => 'actor', 'type' => 'user']],
 			],
+			['object_shared', ['metaData' => ['id' => 'geo:52.5450511,13.3741463', 'type' => 'geo-location', 'name' => 'Nextcloud Berlin Office']], 'actor',
+				'{object}',
+				['actor' => ['id' => 'actor', 'type' => 'user'], 'object' => ['id' => 'geo:52.5450511,13.3741463', 'type' => 'geo-location', 'name' => 'Nextcloud Berlin Office']],
+			],
+			['object_shared', ['metaData' => ['id' => 'geo:48,15', 'type' => 'geo-location', 'name' => 'Coarse coordinate']], 'actor',
+				'{object}',
+				['actor' => ['id' => 'actor', 'type' => 'user'], 'object' => ['id' => 'geo:48,15', 'type' => 'geo-location', 'name' => 'Coarse coordinate']],
+			],
+			['object_shared', ['metaData' => ['id' => 'geo:-48.15,-16.23,-42.108', 'type' => 'geo-location', 'name' => 'Negative coordinate with altitude']], 'actor',
+				'{object}',
+				['actor' => ['id' => 'actor', 'type' => 'user'], 'object' => ['id' => 'geo:-48.15,-16.23,-42.108', 'type' => 'geo-location', 'name' => 'Negative coordinate with altitude']],
+			],
+			['object_shared', ['metaData' => ['id' => 'geo:52.5450511,13.3741463;crs=wgs84', 'type' => 'geo-location', 'name' => 'Coordinate with reference system']], 'actor',
+				'{object}',
+				['actor' => ['id' => 'actor', 'type' => 'user'], 'object' => ['id' => 'geo:52.5450511,13.3741463;crs=wgs84', 'type' => 'geo-location', 'name' => 'Coordinate with reference system']],
+			],
+			['object_shared', ['metaData' => ['id' => 'geo:52.5450511,13.3741463;u=42', 'type' => 'geo-location', 'name' => 'Coordinate with uncertainty']], 'actor',
+				'{object}',
+				['actor' => ['id' => 'actor', 'type' => 'user'], 'object' => ['id' => 'geo:52.5450511,13.3741463;u=42', 'type' => 'geo-location', 'name' => 'Coordinate with uncertainty']],
+			],
+			['object_shared', ['metaData' => ['id' => 'geo:52.5450511,13.3741463;crs=wgs84;u=42', 'type' => 'geo-location', 'name' => 'Coordinate with reference system and uncertainty']], 'actor',
+				'{object}',
+				['actor' => ['id' => 'actor', 'type' => 'user'], 'object' => ['id' => 'geo:52.5450511,13.3741463;crs=wgs84;u=42', 'type' => 'geo-location', 'name' => 'Coordinate with reference system and uncertainty']],
+			],
+			['object_shared', ['metaData' => ['id' => 'https://nextcloud.com', 'type' => 'geo-location', 'name' => 'Link instead of geo location']], 'actor',
+				'The shared location is malformed',
+				[],
+			],
 		];
 	}
 
@@ -411,18 +468,25 @@ class SystemMessageTest extends TestCase {
 				->willReturn($recipientId);
 		}
 
-		$parser = $this->getParser(['getActorFromComment', 'getUser', 'getGuest', 'parseCall', 'getFileFromShare']);
+		/** @var Room|MockObject $room */
+		$room = $this->createMock(Room::class);
+
+		$parser = $this->getParser(['getActorFromComment', 'getUser', 'getGroup', 'getGuest', 'parseCall', 'getFileFromShare']);
 		$parser->expects($this->once())
 			->method('getActorFromComment')
-			->with($comment)
+			->with($room, $comment)
 			->willReturn(['id' => 'actor', 'type' => 'user']);
 		$parser->expects($this->any())
 			->method('getUser')
 			->with($parameters['user'] ?? 'user')
 			->willReturn(['id' => $parameters['user'] ?? 'user', 'type' => 'user']);
 		$parser->expects($this->any())
+			->method('getGroup')
+			->with($parameters['group'] ?? 'group')
+			->willReturn(['id' => $parameters['group'] ?? 'group', 'type' => 'group']);
+		$parser->expects($this->any())
 			->method('getGuest')
-			->with($parameters['session'] ?? 'guest')
+			->with($room, $parameters['session'] ?? 'guest')
 			->willReturn(['id' => $parameters['session'] ?? 'guest', 'type' => 'guest']);
 
 		if ($message === 'call_ended') {
@@ -452,8 +516,6 @@ class SystemMessageTest extends TestCase {
 				->method('getFileFromShare');
 		}
 
-		/** @var Room|MockObject $room */
-		$room = $this->createMock(Room::class);
 		$chatMessage = new Message($room, $participant, $comment, $this->l);
 		$chatMessage->setMessage(json_encode([
 			'message' => $message,
@@ -486,14 +548,15 @@ class SystemMessageTest extends TestCase {
 		/** @var IComment|MockObject $comment */
 		$comment = $this->createMock(IComment::class);
 
+		/** @var Room|MockObject $room */
+		$room = $this->createMock(Room::class);
+
 		$parser = $this->getParser(['getActorFromComment']);
 		$parser->expects($this->any())
 			->method('getActorFromComment')
-			->with($comment)
+			->with($room, $comment)
 			->willReturn(['id' => 'actor', 'type' => 'user']);
 
-		/** @var Room|MockObject $room */
-		$room = $this->createMock(Room::class);
 		/** @var Participant|MockObject $participant */
 		$participant = $this->createMock(Participant::class);
 		$chatMessage = new Message($room, $participant, $comment, $this->l);
@@ -511,7 +574,7 @@ class SystemMessageTest extends TestCase {
 		$node->expects($this->once())
 			->method('getName')
 			->willReturn('name');
-		$node->expects($this->once())
+		$node->expects($this->atLeastOnce())
 			->method('getMimeType')
 			->willReturn('text/plain');
 		$node->expects($this->once())
@@ -572,7 +635,7 @@ class SystemMessageTest extends TestCase {
 		$node->expects($this->once())
 			->method('getPath')
 			->willReturn('/owner/files/path/to/file/name');
-		$node->expects($this->once())
+		$node->expects($this->atLeastOnce())
 			->method('getMimeType')
 			->willReturn('httpd/unix-directory');
 		$node->expects($this->once())
@@ -637,7 +700,7 @@ class SystemMessageTest extends TestCase {
 		$node->expects($this->once())
 			->method('getName')
 			->willReturn('name');
-		$node->expects($this->once())
+		$node->expects($this->atLeastOnce())
 			->method('getMimeType')
 			->willReturn('application/octet-stream');
 		$node->expects($this->once())
@@ -790,6 +853,9 @@ class SystemMessageTest extends TestCase {
 	 * @param array $expected
 	 */
 	public function testGetActor(string $actorType, array $guestData, array $userData, array $expected) {
+		/** @var Room|MockObject $room */
+		$room = $this->createMock(Room::class);
+
 		$chatMessage = $this->createMock(IComment::class);
 		$chatMessage->expects($this->once())
 			->method('getActorType')
@@ -805,7 +871,7 @@ class SystemMessageTest extends TestCase {
 		} else {
 			$parser->expects($this->once())
 				->method('getGuest')
-				->with('author-id')
+				->with($room, 'author-id')
 				->willReturn($guestData);
 		}
 
@@ -819,7 +885,7 @@ class SystemMessageTest extends TestCase {
 				->willReturn($userData);
 		}
 
-		$this->assertSame($expected, self::invokePrivate($parser, 'getActorFromComment', [$chatMessage]));
+		$this->assertSame($expected, self::invokePrivate($parser, 'getActorFromComment', [$room, $chatMessage]));
 	}
 
 	public function dataGetUser(): array {
@@ -893,50 +959,140 @@ class SystemMessageTest extends TestCase {
 		$this->assertSame($name, self::invokePrivate($parser, 'getDisplayName', [$uid]));
 	}
 
+	public function dataGetGroup(): array {
+		return [
+			['test', [], false, 'Test'],
+			['foo', ['admin' => 'Admin'], false, 'Bar'],
+			['admin', ['admin' => 'Administrator'], true, 'Administrator'],
+		];
+	}
+
+	/**
+	 * @dataProvider dataGetGroup
+	 * @param string $gid
+	 * @param array $cache
+	 * @param bool $cacheHit
+	 * @param string $name
+	 */
+	public function testGetGroup(string $gid, array $cache, bool $cacheHit, string $name): void {
+		$parser = $this->getParser(['getDisplayNameGroup']);
+
+		self::invokePrivate($parser, 'groupNames', [$cache]);
+
+		if (!$cacheHit) {
+			$parser->expects(self::once())
+				->method('getDisplayNameGroup')
+				->with($gid)
+				->willReturn($name);
+		} else {
+			$parser->expects(self::never())
+				->method('getDisplayNameGroup');
+		}
+
+		$result = self::invokePrivate($parser, 'getGroup', [$gid]);
+		self::assertSame('group', $result['type']);
+		self::assertSame($gid, $result['id']);
+		self::assertSame($name, $result['name']);
+	}
+
+	public function dataGetDisplayNameGroup(): array {
+		return [
+			['test', true, 'Test'],
+			['foo', false, 'foo'],
+		];
+	}
+
+	/**
+	 * @dataProvider dataGetDisplayNameGroup
+	 * @param string $gid
+	 * @param bool $validGroup
+	 * @param string $name
+	 */
+	public function testGetDisplayNameGroup(string $gid, bool $validGroup, string $name): void {
+		$parser = $this->getParser();
+
+		if ($validGroup) {
+			$group = $this->createMock(IGroup::class);
+			$group->expects(self::once())
+				->method('getDisplayName')
+				->willReturn($name);
+			$this->groupManager->expects(self::once())
+				->method('get')
+				->with($gid)
+				->willReturn($group);
+		} else {
+			$this->groupManager->expects(self::once())
+				->method('get')
+				->with($gid)
+				->willReturn(null);
+		}
+
+		self::assertSame($name, self::invokePrivate($parser, 'getDisplayNameGroup', [$gid]));
+	}
+
 	public function testGetGuest() {
-		$sessionHash = sha1('name');
+		$actorId = sha1('name');
+
+		/** @var Room|MockObject $room */
+		$room = $this->createMock(Room::class);
+
 		$parser = $this->getParser(['getGuestName']);
 		$parser->expects($this->once())
 			->method('getGuestName')
-			->with($sessionHash)
+			->with($room, $actorId)
 			->willReturn('name');
 
 		$this->assertSame([
 			'type' => 'guest',
-			'id' => 'guest/' . $sessionHash,
+			'id' => 'guest/' . $actorId,
 			'name' => 'name',
-		], self::invokePrivate($parser, 'getGuest', [$sessionHash]));
+		], self::invokePrivate($parser, 'getGuest', [$room, $actorId]));
 
 		// Cached call: no call to getGuestName() again
 		$this->assertSame([
 			'type' => 'guest',
-			'id' => 'guest/' . $sessionHash,
+			'id' => 'guest/' . $actorId,
 			'name' => 'name',
-		], self::invokePrivate($parser, 'getGuest', [$sessionHash]));
+		], self::invokePrivate($parser, 'getGuest', [$room, $actorId]));
 	}
 
 	public function testGetGuestName() {
-		$sessionHash = sha1('name');
-		$this->guestManager->expects($this->once())
-			->method('getNameBySessionHash')
-			->with($sessionHash)
-			->willReturn('name');
+		$actorId = sha1('name');
+
+		/** @var Room|MockObject $room */
+		$room = $this->createMock(Room::class);
+
+		$attendee = Attendee::fromParams([
+			'displayName' => 'name',
+		]);
+
+		/** @var Participant|MockObject $room */
+		$participant = $this->createMock(Participant::class);
+		$participant->method('getAttendee')
+			->willReturn($attendee);
+
+		$room->method('getParticipantByActor')
+			->with(Attendee::ACTOR_GUESTS, $actorId)
+			->willReturn($participant);
 
 		$parser = $this->getParser();
 		self::invokePrivate($parser, 'l', [$this->l]);
-		$this->assertSame('name (guest)', self::invokePrivate($parser, 'getGuestName', [$sessionHash]));
+		$this->assertSame('name (guest)', self::invokePrivate($parser, 'getGuestName', [$room, $actorId]));
 	}
 
 	public function testGetGuestNameThrows() {
-		$sessionHash = sha1('name');
-		$this->guestManager->expects($this->once())
-			->method('getNameBySessionHash')
-			->with($sessionHash)
+		$actorId = sha1('name');
+
+		/** @var Room|MockObject $room */
+		$room = $this->createMock(Room::class);
+
+		$room->method('getParticipantByActor')
+			->with(Attendee::ACTOR_GUESTS, $actorId)
 			->willThrowException(new ParticipantNotFoundException());
 
 		$parser = $this->getParser();
 		self::invokePrivate($parser, 'l', [$this->l]);
-		$this->assertSame('Guest', self::invokePrivate($parser, 'getGuestName', [$sessionHash]));
+		$this->assertSame('Guest', self::invokePrivate($parser, 'getGuestName', [$room, $actorId]));
 	}
 
 	public function dataParseCall(): array {

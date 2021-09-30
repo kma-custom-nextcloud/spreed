@@ -82,7 +82,7 @@ function Base(settings) {
 
 Signaling.Base = Base
 Signaling.Base.prototype.on = function(ev, handler) {
-	if (!this.handlers.hasOwnProperty(ev)) {
+	if (!Object.prototype.hasOwnProperty.call(this.handlers, ev)) {
 		this.handlers[ev] = [handler]
 	} else {
 		this.handlers[ev].push(handler)
@@ -101,7 +101,7 @@ Signaling.Base.prototype.on = function(ev, handler) {
 }
 
 Signaling.Base.prototype.off = function(ev, handler) {
-	if (!this.handlers.hasOwnProperty(ev)) {
+	if (!Object.prototype.hasOwnProperty.call(this.handlers, ev)) {
 		return
 	}
 
@@ -176,6 +176,16 @@ Signaling.Base.prototype.leaveCurrentRoom = function() {
 	}
 }
 
+Signaling.Base.prototype.updateCurrentCallFlags = function(flags) {
+	return new Promise((resolve, reject) => {
+		if (this.currentCallToken) {
+			this.updateCallFlags(this.currentCallToken, flags).then(() => { resolve() }).catch(reason => { reject(reason) })
+		} else {
+			resolve()
+		}
+	})
+}
+
 Signaling.Base.prototype.leaveCurrentCall = function() {
 	return new Promise((resolve, reject) => {
 		if (this.currentCallToken) {
@@ -242,8 +252,8 @@ Signaling.Base.prototype._joinCallSuccess = function(/* token */) {
 
 Signaling.Base.prototype.joinCall = function(token, flags) {
 	return new Promise((resolve, reject) => {
-		axios.post(generateOcsUrl('apps/spreed/api/v1/call', 2) + token, {
-			flags: flags,
+		axios.post(generateOcsUrl('apps/spreed/api/v4/call/{token}', { token }), {
+			flags,
 		})
 			.then(function() {
 				this.currentCallToken = token
@@ -266,6 +276,27 @@ Signaling.Base.prototype._leaveCallSuccess = function(/* token */) {
 	// Override in subclasses if necessary.
 }
 
+Signaling.Base.prototype.updateCallFlags = function(token, flags) {
+	return new Promise((resolve, reject) => {
+		if (!token) {
+			reject(new Error())
+			return
+		}
+
+		axios.put(generateOcsUrl('apps/spreed/api/v4/call/{token}', { token }), {
+			flags,
+		})
+			.then(function() {
+				this.currentCallFlags = flags
+				this._trigger('updateCallFlags', [token, flags])
+				resolve()
+			}.bind(this))
+			.catch(function() {
+				reject(new Error())
+			})
+	})
+}
+
 Signaling.Base.prototype.leaveCall = function(token, keepToken) {
 	return new Promise((resolve, reject) => {
 		if (!token) {
@@ -273,7 +304,7 @@ Signaling.Base.prototype.leaveCall = function(token, keepToken) {
 			return
 		}
 
-		axios.delete(generateOcsUrl('apps/spreed/api/v1/call', 2) + token)
+		axios.delete(generateOcsUrl('apps/spreed/api/v4/call/{token}', { token }))
 			.then(function() {
 				this._trigger('leaveCall', [token, keepToken])
 				this._leaveCallSuccess(token)
@@ -343,12 +374,12 @@ Signaling.Internal.prototype.forceReconnect = function(newSession, flags) {
 	// FIXME Naive reconnection routine; as the same session is kept peers
 	// must be explicitly ended before the reconnection is forced.
 	this.leaveCall(this.currentCallToken, true)
-	this.joinCall(this.currentCallToken)
+	this.joinCall(this.currentCallToken, this.currentCallFlags)
 }
 
 Signaling.Internal.prototype._sendMessageWithCallback = function(ev) {
 	const message = [{
-		ev: ev,
+		ev,
 	}]
 
 	this._sendMessages(message)
@@ -362,7 +393,7 @@ Signaling.Internal.prototype._sendMessageWithCallback = function(ev) {
 }
 
 Signaling.Internal.prototype._sendMessages = function(messages) {
-	return axios.post(generateOcsUrl('apps/spreed/api/v1/signaling', 2) + this.currentRoomToken, {
+	return axios.post(generateOcsUrl('apps/spreed/api/v3/signaling/{token}', { token: this.currentRoomToken }), {
 		messages: JSON.stringify(messages),
 	})
 }
@@ -630,7 +661,7 @@ Signaling.Standalone.prototype.connect = function() {
 			console.debug('Received', data)
 		}
 		const id = data.id
-		if (id && this.callbacks.hasOwnProperty(id)) {
+		if (id && Object.prototype.hasOwnProperty.call(this.callbacks, id)) {
 			const cb = this.callbacks[id]
 			delete this.callbacks[id]
 			cb(data)
@@ -681,8 +712,8 @@ Signaling.Standalone.prototype.connect = function() {
 Signaling.Standalone.prototype.sendBye = function() {
 	if (this.connected) {
 		this.doSend({
-			'type': 'bye',
-			'bye': {},
+			type: 'bye',
+			bye: {},
 		})
 	}
 	this.resumeId = null
@@ -743,13 +774,13 @@ Signaling.Standalone.prototype.forceReconnect = function(newSession, flags) {
 Signaling.Standalone.prototype.sendCallMessage = function(data) {
 	if (data.type === 'control') {
 		this.doSend({
-			'type': 'control',
-			'control': {
-				'recipient': {
-					'type': 'session',
-					'sessionid': data.to,
+			type: 'control',
+			control: {
+				recipient: {
+					type: 'session',
+					sessionid: data.to,
 				},
-				'data': data.payload,
+				data: data.payload,
 			},
 		})
 
@@ -757,13 +788,13 @@ Signaling.Standalone.prototype.sendCallMessage = function(data) {
 	}
 
 	this.doSend({
-		'type': 'message',
-		'message': {
-			'recipient': {
-				'type': 'session',
-				'sessionid': data.to,
+		type: 'message',
+		message: {
+			recipient: {
+				type: 'session',
+				sessionid: data.to,
 			},
-			'data': data,
+			data,
 		},
 	})
 }
@@ -775,12 +806,12 @@ Signaling.Standalone.prototype.sendRoomMessage = function(data) {
 	}
 
 	this.doSend({
-		'type': 'message',
-		'message': {
-			'recipient': {
-				'type': 'room',
+		type: 'message',
+		message: {
+			recipient: {
+				type: 'room',
 			},
-			'data': data,
+			data,
 		},
 	})
 }
@@ -796,7 +827,7 @@ Signaling.Standalone.prototype.doSend = function(msg, callback) {
 	if (callback) {
 		const id = this.id++
 		this.callbacks[id] = callback
-		msg['id'] = '' + id
+		msg.id = '' + id
 	}
 	if (OC.debug) {
 		console.debug('Sending', msg)
@@ -809,25 +840,25 @@ Signaling.Standalone.prototype.sendHello = function() {
 	if (this.resumeId) {
 		console.debug('Trying to resume session', this.sessionId)
 		msg = {
-			'type': 'hello',
-			'hello': {
-				'version': '1.0',
-				'resumeid': this.resumeId,
+			type: 'hello',
+			hello: {
+				version: '1.0',
+				resumeid: this.resumeId,
 			},
 		}
 	} else {
 		// Already reconnected with a new session.
 		this._forceReconnect = false
-		const url = generateOcsUrl('apps/spreed/api/v1/signaling', 2) + 'backend'
+		const url = generateOcsUrl('apps/spreed/api/v3/signaling/backend')
 		msg = {
-			'type': 'hello',
-			'hello': {
-				'version': '1.0',
-				'auth': {
-					'url': url,
-					'params': {
-						'userid': this.settings.userId,
-						'ticket': this.settings.ticket,
+			type: 'hello',
+			hello: {
+				version: '1.0',
+				auth: {
+					url,
+					params: {
+						userid: this.settings.userId,
+						ticket: this.settings.ticket,
 					},
 				},
 			},
@@ -970,13 +1001,13 @@ Signaling.Standalone.prototype._joinRoomSuccess = function(token, nextcloudSessi
 
 	console.debug('Join room', token)
 	this.doSend({
-		'type': 'room',
-		'room': {
-			'roomid': token,
+		type: 'room',
+		room: {
+			roomid: token,
 			// Pass the Nextcloud session id to the signaling server. The
 			// session id will be passed through to Nextcloud to check if
 			// the (Nextcloud) user is allowed to join the room.
-			'sessionid': nextcloudSessionId,
+			sessionid: nextcloudSessionId,
 		},
 	}, function(data) {
 		this.joinResponseReceived(data, token)
@@ -995,10 +1026,10 @@ Signaling.Standalone.prototype.joinCall = function(token, flags) {
 
 		const promise = new Promise((resolve, reject) => {
 			this.pendingJoinCall = {
-				token: token,
-				flags: flags,
-				resolve: resolve,
-				reject: reject,
+				token,
+				flags,
+				resolve,
+				reject,
 			}
 		})
 
@@ -1040,9 +1071,9 @@ Signaling.Standalone.prototype.joinResponseReceived = function(data, token) {
 Signaling.Standalone.prototype._doLeaveRoom = function(token) {
 	console.debug('Leave room', token)
 	this.doSend({
-		'type': 'room',
-		'room': {
-			'roomid': '',
+		type: 'room',
+		room: {
+			roomid: '',
 		},
 	}, function(data) {
 		console.debug('Left', data)
@@ -1094,10 +1125,7 @@ Signaling.Standalone.prototype.processRoomEvent = function(data) {
 				delete leftUsers[joinedUsers[i].sessionid]
 
 				if (this.settings.userId && joinedUsers[i].userid === this.settings.userId) {
-					if (this.ownSessionJoined && joinedUsers[i].sessionid !== this.sessionId) {
-						console.error('Duplicated session detected for the same user.')
-						EventBus.$emit('duplicateSessionDetected')
-					} else if (joinedUsers[i].sessionid === this.sessionId) {
+					if (joinedUsers[i].sessionid === this.sessionId) {
 						// We are ignoring joins before we found our own message,
 						// as otherwise you get the warning for your own old session immediately
 						this.ownSessionJoined = true
@@ -1190,15 +1218,15 @@ Signaling.Standalone.prototype.requestOffer = function(sessionid, roomType) {
 	}
 	console.debug('Request offer from', sessionid)
 	this.doSend({
-		'type': 'message',
-		'message': {
-			'recipient': {
-				'type': 'session',
-				'sessionid': sessionid,
+		type: 'message',
+		message: {
+			recipient: {
+				type: 'session',
+				sessionid,
 			},
-			'data': {
-				'type': 'requestoffer',
-				'roomType': roomType,
+			data: {
+				type: 'requestoffer',
+				roomType,
 			},
 		},
 	})
@@ -1219,15 +1247,15 @@ Signaling.Standalone.prototype.sendOffer = function(sessionid, roomType) {
 	}
 	console.debug('Send offer to', sessionid)
 	this.doSend({
-		'type': 'message',
-		'message': {
-			'recipient': {
-				'type': 'session',
-				'sessionid': sessionid,
+		type: 'message',
+		message: {
+			recipient: {
+				type: 'session',
+				sessionid,
 			},
-			'data': {
-				'type': 'sendoffer',
-				'roomType': roomType,
+			data: {
+				type: 'sendoffer',
+				roomType,
 			},
 		},
 	})

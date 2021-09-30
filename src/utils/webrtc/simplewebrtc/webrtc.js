@@ -20,6 +20,12 @@ function WebRTC(opts) {
 			offerToReceiveVideo: 1,
 		},
 		enableDataChannels: true,
+		enableSimulcast: false,
+		maxBitrates: {
+			high: 900000,
+			medium: 300000,
+			low: 100000,
+		},
 	}
 	let item
 
@@ -42,7 +48,7 @@ function WebRTC(opts) {
 
 	// set options
 	for (item in options) {
-		if (options.hasOwnProperty(item)) {
+		if (Object.prototype.hasOwnProperty.call(options, item)) {
 			this.config[item] = options[item]
 		}
 	}
@@ -112,6 +118,8 @@ WebRTC.prototype.sendToAll = function(message, payload) {
 	this.peers.forEach(function(peer) {
 		peer.send(message, payload)
 	})
+
+	this.emit('sendToAll', message, payload)
 }
 
 // sends message to all using a datachannel

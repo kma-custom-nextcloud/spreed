@@ -25,7 +25,6 @@ declare(strict_types=1);
 
 namespace OCA\Talk\Controller;
 
-use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use OCA\Talk\Config;
 use OCA\Talk\Events\SignalingEvent;
 use OCA\Talk\Exceptions\RoomNotFoundException;
@@ -43,12 +42,14 @@ use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\AppFramework\OCSController;
 use OCP\AppFramework\Utility\ITimeFactory;
+use OCP\DB\Exception;
 use OCP\EventDispatcher\IEventDispatcher;
 use OCP\Http\Client\IClientService;
 use OCP\IDBConnection;
 use OCP\IRequest;
 use OCP\IUser;
 use OCP\IUserManager;
+use Psr\Log\LoggerInterface;
 
 class SignalingController extends OCSController {
 
@@ -81,6 +82,8 @@ class SignalingController extends OCSController {
 	private $timeFactory;
 	/** @var IClientService */
 	private $clientService;
+	/** @var LoggerInterface */
+	private $logger;
 	/** @var string|null */
 	private $userId;
 
@@ -98,6 +101,7 @@ class SignalingController extends OCSController {
 								IEventDispatcher $dispatcher,
 								ITimeFactory $timeFactory,
 								IClientService $clientService,
+								LoggerInterface $logger,
 								?string $UserId) {
 		parent::__construct($appName, $request);
 		$this->talkConfig = $talkConfig;
@@ -112,19 +116,17 @@ class SignalingController extends OCSController {
 		$this->dispatcher = $dispatcher;
 		$this->timeFactory = $timeFactory;
 		$this->clientService = $clientService;
+		$this->logger = $logger;
 		$this->userId = $UserId;
 	}
 
 	/**
 	 * @PublicPage
 	 *
-	 * @param string $apiVersion
 	 * @param string $token
 	 * @return DataResponse
 	 */
-	public function getSettings(string $apiVersion, string $token = ''): DataResponse {
-		$apiV = (int) substr($apiVersion, 1);
-
+	public function getSettings(string $token = ''): DataResponse {
 		try {
 			if ($token !== '') {
 				$room = $this->manager->getRoomForUserByToken($token, $this->userId);
@@ -137,28 +139,32 @@ class SignalingController extends OCSController {
 		}
 
 		$stun = [];
-		$stunServer = $this->talkConfig->getStunServer();
-		if ($stunServer) {
-			$stun[] = [
-				'url' => 'stun:' . $stunServer,
-			];
+		$stunUrls = [];
+		$stunServers = $this->talkConfig->getStunServers();
+		foreach ($stunServers as $stunServer) {
+			$stunUrls[] = 'stun:' . $stunServer;
 		}
+		$stun[] = [
+			'urls' => $stunUrls
+		];
 
 		$turn = [];
 		$turnSettings = $this->talkConfig->getTurnSettings();
-		if (!empty($turnSettings['server'])) {
-			$schemes = explode(',', $turnSettings['schemes']);
-			$protocols = explode(',', $turnSettings['protocols']);
+		foreach ($turnSettings as $turnServer) {
+			$turnUrls = [];
+			$schemes = explode(',', $turnServer['schemes']);
+			$protocols = explode(',', $turnServer['protocols']);
 			foreach ($schemes as $scheme) {
 				foreach ($protocols as $proto) {
-					$turn[] = [
-						'url' => [$scheme . ':' . $turnSettings['server'] . '?transport=' . $proto],
-						'urls' => [$scheme . ':' . $turnSettings['server'] . '?transport=' . $proto],
-						'username' => $turnSettings['username'],
-						'credential' => $turnSettings['password'],
-					];
+					$turnUrls[] = $scheme . ':' . $turnServer['server'] . '?transport=' . $proto;
 				}
 			}
+
+			$turn[] = [
+				'urls' => $turnUrls,
+				'username' => $turnServer['username'],
+				'credential' => $turnServer['password'],
+			];
 		}
 
 		$signalingMode = $this->talkConfig->getSignalingMode();
@@ -172,11 +178,8 @@ class SignalingController extends OCSController {
 			'ticket' => $this->talkConfig->getSignalingTicket($this->userId),
 			'stunservers' => $stun,
 			'turnservers' => $turn,
+			'sipDialinInfo' => $this->talkConfig->isSIPConfigured() ? $this->talkConfig->getDialInInfo() : '',
 		];
-
-		if ($apiV >= 2) {
-			$data['sipDialinInfo'] = $this->talkConfig->isSIPConfigured() ? $this->talkConfig->getDialInInfo() : '';
-		}
 
 		return new DataResponse($data);
 	}
@@ -351,7 +354,7 @@ class SignalingController extends OCSController {
 				if ($this->userId) {
 					// For logged in users we check if they are still part of the public conversation,
 					// if not they were removed instead of having a conflict.
-					$room->getParticipant($this->userId);
+					$room->getParticipant($this->userId, false);
 				}
 
 				// Session was killed, make the UI redirect to an error
@@ -382,11 +385,11 @@ class SignalingController extends OCSController {
 		$timestamp = min($this->timeFactory->getTime() - (self::PULL_MESSAGES_TIMEOUT + 10), $pingTimestamp);
 		// "- 1" is needed because only the participants whose last ping is
 		// greater than the given timestamp are returned.
-		$participants = $this->participantService->getParticipantsForRoom($room);
+		$participants = $this->participantService->getParticipantsForAllSessions($room, $timestamp - 1);
 		foreach ($participants as $participant) {
 			$session = $participant->getSession();
 			if (!$session instanceof Session) {
-				// User is not active
+				// This is just to make Psalm happy, since we select by session it's always with one.
 				continue;
 			}
 
@@ -401,6 +404,7 @@ class SignalingController extends OCSController {
 				'lastPing' => $session->getLastPing(),
 				'sessionId' => $session->getSessionId(),
 				'inCall' => $session->getInCall(),
+				'publishingPermissions' => $participant->getAttendee()->getPublishingPermissions(),
 			];
 		}
 
@@ -495,6 +499,10 @@ class SignalingController extends OCSController {
 		$params = $auth['params'];
 		$userId = $params['userid'];
 		if (!$this->talkConfig->validateSignalingTicket($userId, $params['ticket'])) {
+			$this->logger->debug('Signaling ticket for {user} was not valid', [
+				'user' => !empty($userId) ? $userId : '(guests)',
+				'app' => 'spreed-hpb',
+			]);
 			return new DataResponse([
 				'type' => 'error',
 				'error' => [
@@ -507,6 +515,10 @@ class SignalingController extends OCSController {
 		if (!empty($userId)) {
 			$user = $this->userManager->get($userId);
 			if (!$user instanceof IUser) {
+				$this->logger->debug('Tried to validate signaling ticket for {user}, but user manager returned no user', [
+					'user' => $userId,
+					'app' => 'spreed-hpb',
+				]);
 				return new DataResponse([
 					'type' => 'error',
 					'error' => [
@@ -529,6 +541,10 @@ class SignalingController extends OCSController {
 				'displayname' => $user->getDisplayName(),
 			];
 		}
+		$this->logger->debug('Validated signaling ticket for {user}', [
+			'user' => !empty($userId) ? $userId : '(guests)',
+			'app' => 'spreed-hpb',
+		]);
 		return new DataResponse($response);
 	}
 
@@ -546,6 +562,12 @@ class SignalingController extends OCSController {
 			try {
 				$room = $this->manager->getRoomByActor($token, $actorType, $actorId);
 			} catch (RoomNotFoundException $e) {
+				$this->logger->debug('Failed to get room {token} by actor {actorType}/{actorId}', [
+					'token' => $token,
+					'actorType' => $actorType ?? 'null',
+					'actorId' => $actorId ?? 'null',
+					'app' => 'spreed-hpb',
+				]);
 				return new DataResponse([
 					'type' => 'error',
 					'error' => [
@@ -563,14 +585,14 @@ class SignalingController extends OCSController {
 						// If the user joins the session might not be known to the server yet.
 						// In this case we load by actor information and use the session id as new session.
 						try {
-							$participant = $room->getParticipantByActor($actorType, $actorId);
+							$participant = $room->getParticipantByActor($actorType, $actorId, false);
 						} catch (ParticipantNotFoundException $e) {
 						}
 					}
 				}
 			} else {
 				try {
-					$participant = $room->getParticipantByActor($actorType, $actorId);
+					$participant = $room->getParticipantByActor($actorType, $actorId, false);
 				} catch (ParticipantNotFoundException $e) {
 				}
 			}
@@ -579,6 +601,10 @@ class SignalingController extends OCSController {
 				// FIXME Don't preload with the user as that misses the session, kinda meh.
 				$room = $this->manager->getRoomByToken($token);
 			} catch (RoomNotFoundException $e) {
+				$this->logger->debug('Failed to get room by token {token}', [
+					'token' => $token,
+					'app' => 'spreed-hpb',
+				]);
 				return new DataResponse([
 					'type' => 'error',
 					'error' => [
@@ -596,13 +622,17 @@ class SignalingController extends OCSController {
 			} elseif (!empty($userId)) {
 				// User trying to join room.
 				try {
-					$participant = $room->getParticipant($userId);
+					$participant = $room->getParticipant($userId, false);
 				} catch (ParticipantNotFoundException $e) {
 				}
 			}
 		}
 
 		if (!$participant instanceof Participant) {
+			$this->logger->debug('Failed to get room {token} with participant', [
+				'token' => $token,
+				'app' => 'spreed-hpb',
+			]);
 			// Return generic error to avoid leaking which rooms exist.
 			return new DataResponse([
 				'type' => 'error',
@@ -617,7 +647,7 @@ class SignalingController extends OCSController {
 			if ($sessionId && !$participant->getSession() instanceof Session) {
 				try {
 					$session = $this->sessionService->createSessionForAttendee($participant->getAttendee(), $sessionId);
-				} catch (UniqueConstraintViolationException $e) {
+				} catch (Exception $e) {
 					return new DataResponse([
 						'type' => 'error',
 						'error' => [
@@ -647,9 +677,31 @@ class SignalingController extends OCSController {
 			}
 		}
 
-		$permissions = ['publish-media', 'publish-screen'];
-		if ($participant instanceof Participant && $participant->hasModeratorPermissions(false)) {
-			$permissions[] = 'control';
+		$permissions = [];
+		if ($participant instanceof Participant) {
+			$this->logger->debug('Room request to "{action}" room {token} by actor {actorType}/{actorId}', [
+				'token' => $token,
+				'action' => $action ?? 'null',
+				'actorType' => $participant->getAttendee()->getActorType(),
+				'actorId' => $participant->getAttendee()->getActorId(),
+				'app' => 'spreed-hpb',
+			]);
+
+			if ($participant->getAttendee()->getPublishingPermissions() & (Attendee::PUBLISHING_PERMISSIONS_AUDIO | Attendee::PUBLISHING_PERMISSIONS_VIDEO)) {
+				$permissions[] = 'publish-media';
+			}
+			if ($participant->getAttendee()->getPublishingPermissions() & Attendee::PUBLISHING_PERMISSIONS_SCREENSHARING) {
+				$permissions[] = 'publish-screen';
+			}
+			if ($participant->hasModeratorPermissions(false)) {
+				$permissions[] = 'control';
+			}
+		} else {
+			$this->logger->debug('Room request to "{action}" room {token} without session', [
+				'token' => $token,
+				'action' => $action ?? 'null',
+				'app' => 'spreed-hpb',
+			]);
 		}
 
 		$event = new SignalingEvent($room, $participant, $action);
@@ -674,6 +726,10 @@ class SignalingController extends OCSController {
 		try {
 			$room = $this->manager->getRoomByToken($request['roomid']);
 		} catch (RoomNotFoundException $e) {
+			$this->logger->debug('Tried to ping non existing room {token}', [
+				'token' => $request['roomid'],
+				'app' => 'spreed-hpb',
+			]);
 			return new DataResponse([
 				'type' => 'error',
 				'error' => [
@@ -701,6 +757,11 @@ class SignalingController extends OCSController {
 				'roomid' => $room->getToken(),
 			],
 		];
+		$this->logger->debug('Pinged {numSessions} sessions in room {token}', [
+			'numSessions' => count($pingSessionIds),
+			'token' => $request['roomid'],
+			'app' => 'spreed-hpb',
+		]);
 		return new DataResponse($response);
 	}
 }

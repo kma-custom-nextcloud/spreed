@@ -59,7 +59,7 @@ class Capabilities implements IPublicCapability {
 				'audio',
 				'video',
 				'chat-v2',
-				'conversation-v2',
+				'conversation-v4',
 				'guest-signaling',
 				'empty-group-room',
 				'guest-display-names',
@@ -83,7 +83,6 @@ class Capabilities implements IPublicCapability {
 				'chat-replies',
 				'circles-support',
 				'force-mute',
-				'conversation-v3',
 				'sip-support',
 				'chat-read-status',
 				'phonebook-search',
@@ -91,6 +90,11 @@ class Capabilities implements IPublicCapability {
 				'room-description',
 				'rich-object-sharing',
 				'temp-user-avatar-api',
+				'geo-location-sharing',
+				'voice-message-sharing',
+				'signaling-v3',
+				'publishing-permissions',
+				'clear-history',
 			],
 			'config' => [
 				'attachments' => [

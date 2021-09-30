@@ -39,10 +39,8 @@
 			</button>
 		</div>
 		<template v-else>
-			<div class="call-button-wrapper">
-				<CallButton class="call-button" />
-			</div>
-			<ChatView :token="token" />
+			<CallButton class="call-button" />
+			<ChatView />
 			<UploadEditor />
 		</template>
 	</div>
@@ -52,10 +50,7 @@
 
 import { EventBus } from './services/EventBus'
 import { getFileConversation } from './services/filesIntegrationServices'
-import { fetchConversation } from './services/conversationsService'
 import {
-	joinConversation,
-	leaveConversation,
 	leaveConversationSync,
 } from './services/participantsService'
 import CancelableRequest from './utils/cancelableRequest'
@@ -69,6 +64,8 @@ import ChatView from './components/ChatView'
 import sessionIssueHandler from './mixins/sessionIssueHandler'
 import browserCheck from './mixins/browserCheck'
 import '@nextcloud/dialogs/styles/toast.scss'
+import { register } from 'extendable-media-recorder'
+import { connect } from 'extendable-media-recorder-wav-encoder'
 
 export default {
 
@@ -141,6 +138,11 @@ export default {
 		},
 	},
 
+	async mounted() {
+		// Initialise audiorecorder encoder
+		register(await connect())
+	},
+
 	created() {
 		// The fetchCurrentConversation event handler/callback is started and
 		// stopped from different FilesSidebarTabApp instances, so it needs to
@@ -185,7 +187,7 @@ export default {
 				return
 			}
 
-			await joinConversation(this.token)
+			await this.$store.dispatch('joinConversation', { token: this.token })
 
 			// The current participant (which is automatically set when fetching
 			// the current conversation) is needed for the MessagesList to start
@@ -219,6 +221,8 @@ export default {
 			EventBus.$off('Signaling::participantListChanged', OCA.Talk.fetchCurrentConversationWrapper)
 			window.clearInterval(OCA.Talk.fetchCurrentConversationIntervalId)
 
+			// TODO: move to store under a special action ?
+
 			// Remove the conversation to ensure that the old data is not used
 			// before fetching it again if this conversation is joined again.
 			this.$store.dispatch('deleteConversation', this.token)
@@ -226,7 +230,7 @@ export default {
 			// if this conversation is joined again.
 			this.$store.dispatch('purgeParticipantsStore', this.token)
 
-			leaveConversation(this.token)
+			this.$store.dispatch('leaveConversation', { token: this.token })
 
 			this.$store.dispatch('updateTokenAndFileIdForToken', {
 				newToken: null,
@@ -262,9 +266,7 @@ export default {
 				return
 			}
 
-			const response = await fetchConversation(this.token)
-			this.$store.dispatch('addConversation', response.data.ocs.data)
-			this.$store.dispatch('markConversationRead', this.token)
+			await this.$store.dispatch('fetchConversation', { token: this.token })
 		},
 
 		/**
@@ -424,25 +426,13 @@ export default {
 	justify-content: center;
 }
 
-.call-button-wrapper {
-	width: 100%;
-	background-color: var(--color-main-background);
-	z-index: 1;
-}
-
 .call-button {
-	display: block;
-
 	/* Center button horizontally. */
 	margin-left: auto;
 	margin-right: auto;
 
 	margin-top: 10px;
 	margin-bottom: 10px;
-}
-
-::v-deep .scroller {
-	margin-top: 64px;
 }
 
 .chatView {

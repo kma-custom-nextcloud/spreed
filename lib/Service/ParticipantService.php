@@ -23,8 +23,13 @@ declare(strict_types=1);
 
 namespace OCA\Talk\Service;
 
+use OCA\Circles\Api\v1\Circles;
+use OCA\Circles\Model\Circle;
+use OCA\Circles\Model\Member;
 use OCA\Talk\Config;
 use OCA\Talk\Events\AddParticipantsEvent;
+use OCA\Talk\Events\AttendeesAddedEvent;
+use OCA\Talk\Events\AttendeesRemovedEvent;
 use OCA\Talk\Events\JoinRoomGuestEvent;
 use OCA\Talk\Events\JoinRoomUserEvent;
 use OCA\Talk\Events\ModifyParticipantEvent;
@@ -46,10 +51,12 @@ use OCA\Talk\Webinary;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\Comments\IComment;
+use OCP\DB\Exception;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\EventDispatcher\IEventDispatcher;
 use OCP\IConfig;
 use OCP\IDBConnection;
+use OCP\IGroup;
 use OCP\IUser;
 use OCP\IUserManager;
 use OCP\IGroupManager;
@@ -105,6 +112,12 @@ class ParticipantService {
 
 	public function updateParticipantType(Room $room, Participant $participant, int $participantType): void {
 		$attendee = $participant->getAttendee();
+
+		if ($attendee->getActorType() === Attendee::ACTOR_GROUPS) {
+			// Can not promote/demote groups
+			return;
+		}
+
 		$oldType = $attendee->getParticipantType();
 
 		$event = new ModifyParticipantEvent($room, $participant, 'type', $participantType, $oldType);
@@ -114,6 +127,25 @@ class ParticipantService {
 		$this->attendeeMapper->update($attendee);
 
 		$this->dispatcher->dispatch(Room::EVENT_AFTER_PARTICIPANT_TYPE_SET, $event);
+	}
+
+	public function updatePublishingPermissions(Room $room, Participant $participant, int $newState): void {
+		$attendee = $participant->getAttendee();
+
+		if ($attendee->getActorType() === Attendee::ACTOR_GROUPS || $attendee->getActorType() === Attendee::ACTOR_CIRCLES) {
+			// Can not set publishing permissions for those actor types
+			return;
+		}
+
+		$oldState = $attendee->getPublishingPermissions();
+
+		$event = new ModifyParticipantEvent($room, $participant, 'publishingPermissions', $newState, $oldState);
+		$this->dispatcher->dispatch(Room::EVENT_BEFORE_PARTICIPANT_PUBLISHING_PERMISSIONS_SET, $event);
+
+		$attendee->setPublishingPermissions($newState);
+		$this->attendeeMapper->update($attendee);
+
+		$this->dispatcher->dispatch(Room::EVENT_AFTER_PARTICIPANT_PUBLISHING_PERMISSIONS_SET, $event);
 	}
 
 	public function updateLastReadMessage(Participant $participant, int $lastReadMessage): void {
@@ -182,6 +214,7 @@ class ParticipantService {
 				$this->addUsers($room, [[
 					'actorType' => Attendee::ACTOR_USERS,
 					'actorId' => $user->getUID(),
+					'displayName' => $user->getDisplayName(),
 					// need to use "USER" here, because "USER_SELF_JOINED" only works for public calls
 					'participantType' => Participant::USER,
 				]]);
@@ -190,6 +223,7 @@ class ParticipantService {
 				$this->addUsers($room, [[
 					'actorType' => Attendee::ACTOR_USERS,
 					'actorId' => $user->getUID(),
+					'displayName' => $user->getDisplayName(),
 					'participantType' => Participant::USER_SELF_JOINED,
 				]]);
 			} else {
@@ -211,11 +245,12 @@ class ParticipantService {
 	 * @param Room $room
 	 * @param string $password
 	 * @param bool $passedPasswordProtection
+	 * @param ?Participant $previousParticipant
 	 * @return Participant
 	 * @throws InvalidPasswordException
 	 * @throws UnauthorizedException
 	 */
-	public function joinRoomAsNewGuest(Room $room, string $password, bool $passedPasswordProtection = false): Participant {
+	public function joinRoomAsNewGuest(Room $room, string $password, bool $passedPasswordProtection = false, ?Participant $previousParticipant = null): Participant {
 		$event = new JoinRoomGuestEvent($room, $password, $passedPasswordProtection);
 		$this->dispatcher->dispatch(Room::EVENT_BEFORE_GUEST_CONNECT, $event);
 
@@ -232,21 +267,30 @@ class ParticipantService {
 			$lastMessage = (int) $room->getLastMessage()->getId();
 		}
 
-		$randomActorId = $this->secureRandom->generate(255);
+		if ($previousParticipant instanceof Participant) {
+			$attendee = $previousParticipant->getAttendee();
+		} else {
+			$randomActorId = $this->secureRandom->generate(255);
 
-		$attendee = new Attendee();
-		$attendee->setRoomId($room->getId());
-		$attendee->setActorType(Attendee::ACTOR_GUESTS);
-		$attendee->setActorId($randomActorId);
-		$attendee->setParticipantType(Participant::GUEST);
-		$attendee->setLastReadMessage($lastMessage);
-		$this->attendeeMapper->insert($attendee);
+			$attendee = new Attendee();
+			$attendee->setRoomId($room->getId());
+			$attendee->setActorType(Attendee::ACTOR_GUESTS);
+			$attendee->setActorId($randomActorId);
+			$attendee->setParticipantType(Participant::GUEST);
+			$attendee->setLastReadMessage($lastMessage);
+			$this->attendeeMapper->insert($attendee);
+
+			$attendeeEvent = new AttendeesAddedEvent($room, [$attendee]);
+			$this->dispatcher->dispatchTyped($attendeeEvent);
+		}
 
 		$session = $this->sessionService->createSessionForAttendee($attendee);
 
-		// Update the random guest id
-		$attendee->setActorId(sha1($session->getSessionId()));
-		$this->attendeeMapper->update($attendee);
+		if (!$previousParticipant instanceof Participant) {
+			// Update the random guest id
+			$attendee->setActorId(sha1($session->getSessionId()));
+			$this->attendeeMapper->update($attendee);
+		}
 
 		$this->dispatcher->dispatch(Room::EVENT_AFTER_GUEST_CONNECT, $event);
 
@@ -258,6 +302,9 @@ class ParticipantService {
 	 * @param array $participants
 	 */
 	public function addUsers(Room $room, array $participants): void {
+		if (empty($participants)) {
+			return;
+		}
 		$event = new AddParticipantsEvent($room, $participants);
 		$this->dispatcher->dispatch(Room::EVENT_BEFORE_USERS_ADD, $event);
 
@@ -266,6 +313,7 @@ class ParticipantService {
 			$lastMessage = (int) $room->getLastMessage()->getId();
 		}
 
+		$attendees = [];
 		foreach ($participants as $participant) {
 			$readPrivacy = Participant::PRIVACY_PUBLIC;
 			if ($participant['actorType'] === Attendee::ACTOR_USERS) {
@@ -276,13 +324,183 @@ class ParticipantService {
 			$attendee->setRoomId($room->getId());
 			$attendee->setActorType($participant['actorType']);
 			$attendee->setActorId($participant['actorId']);
+			if (isset($participant['displayName'])) {
+				$attendee->setDisplayName($participant['displayName']);
+			}
 			$attendee->setParticipantType($participant['participantType'] ?? Participant::USER);
 			$attendee->setLastReadMessage($lastMessage);
 			$attendee->setReadPrivacy($readPrivacy);
-			$this->attendeeMapper->insert($attendee);
+			try {
+				$this->attendeeMapper->insert($attendee);
+				$attendees[] = $attendee;
+			} catch (Exception $e) {
+				if ($e->getReason() !== Exception::REASON_UNIQUE_CONSTRAINT_VIOLATION) {
+					throw $e;
+				}
+			}
 		}
 
-		$this->dispatcher->dispatch(Room::EVENT_AFTER_USERS_ADD, $event);
+		if (!empty($attendees)) {
+			$attendeeEvent = new AttendeesAddedEvent($room, $attendees);
+			$this->dispatcher->dispatchTyped($attendeeEvent);
+
+			$this->dispatcher->dispatch(Room::EVENT_AFTER_USERS_ADD, $event);
+		}
+	}
+
+	/**
+	 * @param Room $room
+	 * @param IGroup $group
+	 * @param Participant[] $existingParticipants
+	 */
+	public function addGroup(Room $room, IGroup $group, array $existingParticipants = []): void {
+		$usersInGroup = $group->getUsers();
+
+		if (empty($existingParticipants)) {
+			$existingParticipants = $this->getParticipantsForRoom($room);
+		}
+
+		$participantsByUserId = [];
+		foreach ($existingParticipants as $participant) {
+			if ($participant->getAttendee()->getActorType() === Attendee::ACTOR_USERS) {
+				$participantsByUserId[$participant->getAttendee()->getActorId()] = $participant;
+			}
+		}
+
+		$newParticipants = [];
+		foreach ($usersInGroup as $user) {
+			$existingParticipant = $participantsByUserId[$user->getUID()] ?? null;
+			if ($existingParticipant instanceof Participant) {
+				if ($existingParticipant->getAttendee()->getParticipantType() === Participant::USER_SELF_JOINED) {
+					$this->updateParticipantType($room, $existingParticipant, Participant::USER);
+				}
+
+				// Participant is already in the conversation, so skip them.
+				continue;
+			}
+
+			$newParticipants[] = [
+				'actorType' => Attendee::ACTOR_USERS,
+				'actorId' => $user->getUID(),
+				'displayName' => $user->getDisplayName(),
+			];
+		}
+
+		try {
+			$this->attendeeMapper->findByActor($room->getId(), Attendee::ACTOR_GROUPS, $group->getGID());
+		} catch (DoesNotExistException $e) {
+			$attendee = new Attendee();
+			$attendee->setRoomId($room->getId());
+			$attendee->setActorType(Attendee::ACTOR_GROUPS);
+			$attendee->setActorId($group->getGID());
+			$attendee->setDisplayName($group->getDisplayName());
+			$attendee->setParticipantType(Participant::USER);
+			$attendee->setReadPrivacy(Participant::PRIVACY_PRIVATE);
+			$this->attendeeMapper->insert($attendee);
+
+			$attendeeEvent = new AttendeesAddedEvent($room, [$attendee]);
+			$this->dispatcher->dispatchTyped($attendeeEvent);
+		}
+
+		$this->addUsers($room, $newParticipants);
+	}
+
+	/**
+	 * @param string $circleId
+	 * @param string $userId
+	 * @return Circle
+	 * @throws ParticipantNotFoundException
+	 */
+	public function getCircle(string $circleId, string $userId): Circle {
+		try {
+			$circle = Circles::detailsCircle($circleId);
+		} catch (\Exception $e) {
+			throw new ParticipantNotFoundException('Circle not found');
+		}
+
+		// FIXME use \OCA\Circles\Manager::getLink() in the future
+		$membersInCircle = $circle->getInheritedMembers();
+		foreach ($membersInCircle as $member) {
+			if ($member->isLocal() && $member->getUserType() === Member::TYPE_USER && $member->getUserId() === $userId) {
+				return $circle;
+			}
+		}
+
+		throw new ParticipantNotFoundException('Circle found but not a member');
+	}
+
+	/**
+	 * @param Room $room
+	 * @param Circle $circle
+	 * @param Participant[] $existingParticipants
+	 */
+	public function addCircle(Room $room, Circle $circle, array $existingParticipants = []): void {
+		$membersInCircle = $circle->getMembers();
+
+		if (empty($existingParticipants)) {
+			$existingParticipants = $this->getParticipantsForRoom($room);
+		}
+
+		$participantsByUserId = [];
+		foreach ($existingParticipants as $participant) {
+			if ($participant->getAttendee()->getActorType() === Attendee::ACTOR_USERS) {
+				$participantsByUserId[$participant->getAttendee()->getActorId()] = $participant;
+			}
+		}
+
+		$newParticipants = [];
+		foreach ($membersInCircle as $member) {
+			/** @var Member $member */
+			if ($member->getUserType() !== Member::TYPE_USER || $member->getUserId() === '') {
+				// Not a user?
+				continue;
+			}
+
+			if ($member->getStatus() !== Member::STATUS_INVITED && $member->getStatus() !== Member::STATUS_MEMBER) {
+				// Only allow invited and regular members
+				continue;
+			}
+
+			$user = $this->userManager->get($member->getUserId());
+			if (!$user instanceof IUser) {
+				continue;
+			}
+
+			$existingParticipant = $participantsByUserId[$user->getUID()] ?? null;
+			if ($existingParticipant instanceof Participant) {
+				if ($existingParticipant->getAttendee()->getParticipantType() === Participant::USER_SELF_JOINED) {
+					$this->updateParticipantType($room, $existingParticipant, Participant::USER);
+				}
+
+				// Participant is already in the conversation, so skip them.
+				continue;
+			}
+
+			$newParticipants[] = [
+				'actorType' => Attendee::ACTOR_USERS,
+				'actorId' => $user->getUID(),
+				'displayName' => $user->getDisplayName(),
+			];
+		}
+
+		// No tracking of circles for now
+//		try {
+//			$this->attendeeMapper->findByActor($room->getId(), Attendee::ACTOR_CIRCLES, $circle->getSingleId());
+//		} catch (DoesNotExistException $e) {
+//			$attendee = new Attendee();
+//			$attendee->setRoomId($room->getId());
+//			$attendee->setActorType(Attendee::ACTOR_CIRCLES);
+//			$attendee->setActorId($circle->getSingleId());
+//			$attendee->setDisplayName($circle->getDisplayName());
+//			$attendee->setParticipantType(Participant::USER);
+//			$attendee->setReadPrivacy(Participant::PRIVACY_PRIVATE);
+//			$this->attendeeMapper->insert($attendee);
+//
+//			$attendeeEvent = new AttendeesAddedEvent($room, [$attendee]);
+//			$this->dispatcher->dispatchTyped($attendeeEvent);
+//		}
+
+		$this->addUsers($room, $newParticipants);
 	}
 
 	/**
@@ -311,6 +529,9 @@ class ParticipantService {
 		$this->attendeeMapper->insert($attendee);
 		// FIXME handle duplicate invites gracefully
 
+		$attendeeEvent = new AttendeesAddedEvent($room, [$attendee]);
+		$this->dispatcher->dispatchTyped($attendeeEvent);
+
 		return new Participant($room, $attendee, null);
 	}
 
@@ -335,10 +556,12 @@ class ParticipantService {
 		$missingUsers = array_diff($users, $participants);
 
 		foreach ($missingUsers as $userId) {
-			if ($this->userManager->userExists($userId)) {
+			$user = $this->userManager->get($userId);
+			if ($user instanceof IUser) {
 				$this->addUsers($room, [[
 					'actorType' => Attendee::ACTOR_USERS,
-					'actorId' => $userId,
+					'actorId' => $user->getUID(),
+					'displayName' => $user->getDisplayName(),
 					'participantType' => Participant::OWNER,
 				]]);
 			}
@@ -346,13 +569,8 @@ class ParticipantService {
 	}
 
 	public function leaveRoomAsSession(Room $room, Participant $participant): void {
-		if ($participant->getAttendee()->getActorType() !== Attendee::ACTOR_GUESTS) {
-			$event = new ParticipantEvent($room, $participant);
-			$this->dispatcher->dispatch(Room::EVENT_BEFORE_ROOM_DISCONNECT, $event);
-		} else {
-			$event = new RemoveParticipantEvent($room, $participant, Room::PARTICIPANT_LEFT);
-			$this->dispatcher->dispatch(Room::EVENT_BEFORE_PARTICIPANT_REMOVE, $event);
-		}
+		$event = new ParticipantEvent($room, $participant);
+		$this->dispatcher->dispatch(Room::EVENT_BEFORE_ROOM_DISCONNECT, $event);
 
 		$session = $participant->getSession();
 		if ($session instanceof Session) {
@@ -371,57 +589,108 @@ class ParticipantService {
 			$this->sessionMapper->deleteByAttendeeId($participant->getAttendee()->getId());
 		}
 
-		if ($participant->getAttendee()->getActorType() === Attendee::ACTOR_GUESTS
-			|| $participant->getAttendee()->getParticipantType() === Participant::USER_SELF_JOINED) {
+		if ($participant->getAttendee()->getParticipantType() === Participant::USER_SELF_JOINED) {
 			$this->attendeeMapper->delete($participant->getAttendee());
+
+			$attendeeEvent = new AttendeesRemovedEvent($room, [$participant->getAttendee()]);
+			$this->dispatcher->dispatchTyped($attendeeEvent);
 		}
 
-		if ($participant->getAttendee()->getActorType() !== Attendee::ACTOR_GUESTS) {
-			$this->dispatcher->dispatch(Room::EVENT_AFTER_ROOM_DISCONNECT, $event);
-		} else {
-			$this->dispatcher->dispatch(Room::EVENT_AFTER_PARTICIPANT_REMOVE, $event);
-		}
+		$this->dispatcher->dispatch(Room::EVENT_AFTER_ROOM_DISCONNECT, $event);
 	}
 
-	public function removeAttendee(Room $room, Participant $participant, string $reason): void {
+	public function removeAttendee(Room $room, Participant $participant, string $reason, bool $attendeeEventIsTriggeredAlready = false): void {
 		$isUser = $participant->getAttendee()->getActorType() === Attendee::ACTOR_USERS;
+
+		$sessions = $this->sessionService->getAllSessionsForAttendee($participant->getAttendee());
 
 		if ($isUser) {
 			$user = $this->userManager->get($participant->getAttendee()->getActorId());
-			$event = new RemoveUserEvent($room, $participant, $user, $reason);
+			$event = new RemoveUserEvent($room, $participant, $user, $reason, $sessions);
 			$this->dispatcher->dispatch(Room::EVENT_BEFORE_USER_REMOVE, $event);
 		} else {
-			$event = new RemoveParticipantEvent($room, $participant, $reason);
+			$event = new RemoveParticipantEvent($room, $participant, $reason, $sessions);
 			$this->dispatcher->dispatch(Room::EVENT_BEFORE_PARTICIPANT_REMOVE, $event);
 		}
 
 		$this->sessionMapper->deleteByAttendeeId($participant->getAttendee()->getId());
 		$this->attendeeMapper->delete($participant->getAttendee());
 
+		if (!$attendeeEventIsTriggeredAlready) {
+			$attendeeEvent = new AttendeesRemovedEvent($room, [$participant->getAttendee()]);
+			$this->dispatcher->dispatchTyped($attendeeEvent);
+		}
+
 		if ($isUser) {
 			$this->dispatcher->dispatch(Room::EVENT_AFTER_USER_REMOVE, $event);
 		} else {
 			$this->dispatcher->dispatch(Room::EVENT_AFTER_PARTICIPANT_REMOVE, $event);
 		}
+
+		if ($participant->getAttendee()->getActorType() === Attendee::ACTOR_GROUPS) {
+			$this->removeGroupMembers($room, $participant, $reason);
+		}
+	}
+
+	public function removeGroupMembers(Room $room, Participant $removedGroupParticipant, string $reason): void {
+		$removedGroup = $this->groupManager->get($removedGroupParticipant->getAttendee()->getActorId());
+		if (!$removedGroup instanceof IGroup) {
+			return;
+		}
+
+		$attendeeGroups = $this->attendeeMapper->getActorsByType($room->getId(), Attendee::ACTOR_GROUPS);
+
+		$groupsInRoom = [];
+		foreach ($attendeeGroups as $attendee) {
+			$groupsInRoom[] = $attendee->getActorId();
+		}
+
+		$attendees = [];
+		foreach ($removedGroup->getUsers() as $user) {
+			try {
+				$participant = $room->getParticipant($user->getUID());
+			} catch (ParticipantNotFoundException $e) {
+				continue;
+			}
+
+			$userGroups = $this->groupManager->getUserGroupIds($user);
+			$stillHasGroup = array_intersect($userGroups, $groupsInRoom);
+			if (!empty($stillHasGroup)) {
+				continue;
+			}
+
+			$attendees[] = $participant->getAttendee();
+			if ($participant->getAttendee()->getParticipantType() === Participant::USER) {
+				// Only remove normal users, not moderators/admins
+				$this->removeAttendee($room, $participant, $reason, true);
+			}
+		}
+
+		$attendeeEvent = new AttendeesRemovedEvent($room, $attendees);
+		$this->dispatcher->dispatchTyped($attendeeEvent);
 	}
 
 	public function removeUser(Room $room, IUser $user, string $reason): void {
 		try {
-			$participant = $room->getParticipant($user->getUID());
+			$participant = $room->getParticipant($user->getUID(), false);
 		} catch (ParticipantNotFoundException $e) {
 			return;
 		}
 
-		$event = new RemoveUserEvent($room, $participant, $user, $reason);
+		$attendee = $participant->getAttendee();
+		$sessions = $this->sessionService->getAllSessionsForAttendee($attendee);
+
+		$event = new RemoveUserEvent($room, $participant, $user, $reason, $sessions);
 		$this->dispatcher->dispatch(Room::EVENT_BEFORE_USER_REMOVE, $event);
 
-		$session = $participant->getSession();
-		if ($session instanceof Session) {
+		foreach ($sessions as $session) {
 			$this->sessionMapper->delete($session);
 		}
 
-		$attendee = $participant->getAttendee();
 		$this->attendeeMapper->delete($attendee);
+
+		$attendeeEvent = new AttendeesRemovedEvent($room, [$attendee]);
+		$this->dispatcher->dispatchTyped($attendeeEvent);
 
 		$this->dispatcher->dispatch(Room::EVENT_AFTER_USER_REMOVE, $event);
 	}
@@ -457,13 +726,18 @@ class ParticipantService {
 			->andWhere($query->expr()->isNull('s.id'));
 
 		$attendeeIds = [];
+		$attendees = [];
 		$result = $query->execute();
 		while ($row = $result->fetch()) {
 			$attendeeIds[] = (int) $row['a_id'];
+			$attendees[] = $this->attendeeMapper->createAttendeeFromRow($row);
 		}
 		$result->closeCursor();
 
 		$this->attendeeMapper->deleteByIds($attendeeIds);
+
+		$attendeeEvent = new AttendeesRemovedEvent($room, $attendees);
+		$this->dispatcher->dispatchTyped($attendeeEvent);
 
 		$this->dispatcher->dispatch(Room::EVENT_AFTER_GUESTS_CLEAN, $event);
 	}
@@ -472,6 +746,14 @@ class ParticipantService {
 		$session = $participant->getSession();
 		if (!$session instanceof Session) {
 			return;
+		}
+
+		$publishingPermissions = $participant->getAttendee()->getPublishingPermissions();
+		if (!($publishingPermissions & Attendee::PUBLISHING_PERMISSIONS_AUDIO)) {
+			$flags &= ~Participant::FLAG_WITH_AUDIO;
+		}
+		if (!($publishingPermissions & Attendee::PUBLISHING_PERMISSIONS_VIDEO)) {
+			$flags &= ~Participant::FLAG_WITH_VIDEO;
 		}
 
 		$event = new ModifyParticipantEvent($room, $participant, 'inCall', $flags, $session->getInCall());
@@ -497,6 +779,37 @@ class ParticipantService {
 		}
 	}
 
+	public function updateCallFlags(Room $room, Participant $participant, int $flags): void {
+		$session = $participant->getSession();
+		if (!$session instanceof Session) {
+			return;
+		}
+
+		if (!($session->getInCall() & Participant::FLAG_IN_CALL)) {
+			throw new \Exception('Participant not in call');
+		}
+
+		if (!($flags & Participant::FLAG_IN_CALL)) {
+			throw new \InvalidArgumentException('Invalid flags');
+		}
+
+		$publishingPermissions = $participant->getAttendee()->getPublishingPermissions();
+		if (!($publishingPermissions & Attendee::PUBLISHING_PERMISSIONS_AUDIO)) {
+			$flags &= ~Participant::FLAG_WITH_AUDIO;
+		}
+		if (!($publishingPermissions & Attendee::PUBLISHING_PERMISSIONS_VIDEO)) {
+			$flags &= ~Participant::FLAG_WITH_VIDEO;
+		}
+
+		$event = new ModifyParticipantEvent($room, $participant, 'inCall', $flags, $session->getInCall());
+		$this->dispatcher->dispatch(Room::EVENT_BEFORE_SESSION_UPDATE_CALL_FLAGS, $event);
+
+		$session->setInCall($flags);
+		$this->sessionMapper->update($session);
+
+		$this->dispatcher->dispatch(Room::EVENT_AFTER_SESSION_UPDATE_CALL_FLAGS, $event);
+	}
+
 	public function markUsersAsMentioned(Room $room, array $userIds, int $messageId): void {
 		$query = $this->connection->getQueryBuilder();
 		$query->update('talk_attendees')
@@ -507,10 +820,28 @@ class ParticipantService {
 		$query->execute();
 	}
 
+	public function resetChatDetails(Room $room): void {
+		$query = $this->connection->getQueryBuilder();
+		$query->update('talk_attendees')
+			->set('last_read_message', $query->createNamedParameter(0, IQueryBuilder::PARAM_INT))
+			->set('last_mention_message', $query->createNamedParameter(0, IQueryBuilder::PARAM_INT))
+			->where($query->expr()->eq('room_id', $query->createNamedParameter($room->getId(), IQueryBuilder::PARAM_INT)));
+		$query->executeStatement();
+	}
+
 	public function updateReadPrivacyForActor(string $actorType, string $actorId, int $readPrivacy): void {
 		$query = $this->connection->getQueryBuilder();
 		$query->update('talk_attendees')
 			->set('read_privacy', $query->createNamedParameter($readPrivacy, IQueryBuilder::PARAM_INT))
+			->where($query->expr()->eq('actor_type', $query->createNamedParameter($actorType)))
+			->andWhere($query->expr()->eq('actor_id', $query->createNamedParameter($actorId)));
+		$query->execute();
+	}
+
+	public function updateDisplayNameForActor(string $actorType, string $actorId, string $displayName): void {
+		$query = $this->connection->getQueryBuilder();
+		$query->update('talk_attendees')
+			->set('display_name', $query->createNamedParameter($displayName))
 			->where($query->expr()->eq('actor_type', $query->createNamedParameter($actorType)))
 			->andWhere($query->expr()->eq('actor_id', $query->createNamedParameter($actorId)));
 		$query->execute();
@@ -565,6 +896,26 @@ class ParticipantService {
 
 		$helper = new SelectHelper();
 		$helper->selectAttendeesTable($query);
+		$query->from('talk_attendees', 'a')
+			->where($query->expr()->eq('a.room_id', $query->createNamedParameter($room->getId(), IQueryBuilder::PARAM_INT)));
+
+		return $this->getParticipantsFromQuery($query, $room);
+	}
+
+	/**
+	 * Get all sessions and attendees without a session for the room
+	 *
+	 * This will return multiple items for the same attendee if the attendee
+	 * has multiple sessions in the room.
+	 *
+	 * @param Room $room
+	 * @return Participant[]
+	 */
+	public function getSessionsAndParticipantsForRoom(Room $room): array {
+		$query = $this->connection->getQueryBuilder();
+
+		$helper = new SelectHelper();
+		$helper->selectAttendeesTable($query);
 		$helper->selectSessionsTable($query);
 		$query->from('talk_attendees', 'a')
 			->leftJoin(
@@ -578,30 +929,36 @@ class ParticipantService {
 
 	/**
 	 * @param Room $room
+	 * @param int $maxAge
 	 * @return Participant[]
 	 */
-	public function getParticipantsWithSession(Room $room): array {
+	public function getParticipantsForAllSessions(Room $room, int $maxAge = 0): array {
 		$query = $this->connection->getQueryBuilder();
 
 		$helper = new SelectHelper();
 		$helper->selectAttendeesTable($query);
 		$helper->selectSessionsTable($query);
-		$query->from('talk_attendees', 'a')
+		$query->from('talk_sessions', 's')
 			->leftJoin(
-				'a', 'talk_sessions', 's',
+				's', 'talk_attendees', 'a',
 				$query->expr()->eq('s.attendee_id', 'a.id')
 			)
 			->where($query->expr()->eq('a.room_id', $query->createNamedParameter($room->getId(), IQueryBuilder::PARAM_INT)))
-			->andWhere($query->expr()->isNotNull('s.id'));
+			->andWhere($query->expr()->isNotNull('a.id'));
+
+		if ($maxAge > 0) {
+			$query->andWhere($query->expr()->gt('s.last_ping', $query->createNamedParameter($maxAge, IQueryBuilder::PARAM_INT)));
+		}
 
 		return $this->getParticipantsFromQuery($query, $room);
 	}
 
 	/**
 	 * @param Room $room
+	 * @param int $maxAge
 	 * @return Participant[]
 	 */
-	public function getParticipantsInCall(Room $room): array {
+	public function getParticipantsInCall(Room $room, int $maxAge = 0): array {
 		$query = $this->connection->getQueryBuilder();
 
 		$helper = new SelectHelper();
@@ -614,6 +971,10 @@ class ParticipantService {
 			)
 			->where($query->expr()->eq('a.room_id', $query->createNamedParameter($room->getId(), IQueryBuilder::PARAM_INT)))
 			->andWhere($query->expr()->neq('s.in_call', $query->createNamedParameter(Participant::FLAG_DISCONNECTED)));
+
+		if ($maxAge > 0) {
+			$query->andWhere($query->expr()->gte('s.last_ping', $query->createNamedParameter($maxAge, IQueryBuilder::PARAM_INT)));
+		}
 
 		return $this->getParticipantsFromQuery($query, $room);
 	}
@@ -628,14 +989,16 @@ class ParticipantService {
 
 		$helper = new SelectHelper();
 		$helper->selectAttendeesTable($query);
-		$helper->selectSessionsTable($query);
+		$helper->selectSessionsTableMax($query);
 		$query->from('talk_attendees', 'a')
+			// Currently we only care if the user has a session at all, so we can select any: #ThisIsFine
 			->leftJoin(
 				'a', 'talk_sessions', 's',
 				$query->expr()->eq('s.attendee_id', 'a.id')
 			)
 			->where($query->expr()->eq('a.room_id', $query->createNamedParameter($room->getId(), IQueryBuilder::PARAM_INT)))
-			->andWhere($query->expr()->eq('a.notification_level', $query->createNamedParameter($notificationLevel, IQueryBuilder::PARAM_INT)));
+			->andWhere($query->expr()->eq('a.notification_level', $query->createNamedParameter($notificationLevel, IQueryBuilder::PARAM_INT)))
+			->groupBy('a.id');
 
 		return $this->getParticipantsFromQuery($query, $room);
 	}
@@ -681,6 +1044,20 @@ class ParticipantService {
 
 	/**
 	 * @param Room $room
+	 * @param \DateTime|null $maxLastJoined
+	 * @return int
+	 */
+	public function getGuestCount(Room $room, \DateTime $maxLastJoined = null): int {
+		$maxLastJoinedTimestamp = null;
+		if ($maxLastJoined !== null) {
+			$maxLastJoinedTimestamp = $maxLastJoined->getTimestamp();
+		}
+
+		return $this->attendeeMapper->getActorsCountByType($room->getId(), Attendee::ACTOR_GUESTS, $maxLastJoinedTimestamp);
+	}
+
+	/**
+	 * @param Room $room
 	 * @return string[]
 	 */
 	public function getParticipantUserIdsNotInCall(Room $room): array {
@@ -690,14 +1067,14 @@ class ParticipantService {
 			->from('talk_attendees', 'a')
 			->leftJoin(
 				'a', 'talk_sessions', 's',
-				$query->expr()->eq('s.attendee_id', 'a.id')
+				$query->expr()->andX(
+					$query->expr()->eq('s.attendee_id', 'a.id'),
+					$query->expr()->neq('s.in_call', $query->createNamedParameter(Participant::FLAG_DISCONNECTED)),
+				)
 			)
 			->where($query->expr()->eq('a.room_id', $query->createNamedParameter($room->getId(), IQueryBuilder::PARAM_INT)))
 			->andWhere($query->expr()->eq('a.actor_type', $query->createNamedParameter(Attendee::ACTOR_USERS)))
-			->andWhere($query->expr()->orX(
-				$query->expr()->eq('s.in_call', $query->createNamedParameter(Participant::FLAG_DISCONNECTED)),
-				$query->expr()->isNull('s.in_call')
-			));
+			->andWhere($query->expr()->isNull('s.in_call'));
 
 		$userIds = [];
 		$result = $query->execute();

@@ -27,10 +27,17 @@ import {
 	changeLobbyState,
 	changeReadOnlyState,
 	changeListable,
+	createOneToOneConversation,
 	addToFavorites,
 	removeFromFavorites,
+	fetchConversations,
+	fetchConversation,
 	setConversationName,
-	setConversationDescription } from '../services/conversationsService'
+	setConversationDescription,
+	deleteConversation,
+	clearConversationHistory,
+	setNotificationLevel,
+} from '../services/conversationsService'
 import { getCurrentUser } from '@nextcloud/auth'
 import { CONVERSATION, WEBINAR, PARTICIPANT } from '../constants'
 
@@ -106,6 +113,27 @@ const mutations = {
 	setConversationDescription(state, { token, description }) {
 		Vue.set(state.conversations[token], 'description', description)
 	},
+
+	updateConversationLastReadMessage(state, { token, lastReadMessage }) {
+		Vue.set(state.conversations[token], 'lastReadMessage', lastReadMessage)
+	},
+
+	updateConversationLastMessage(state, { token, lastMessage }) {
+		Vue.set(state.conversations[token], 'lastMessage', lastMessage)
+	},
+
+	updateUnreadMessages(state, { token, unreadMessages, unreadMention }) {
+		if (unreadMessages !== undefined) {
+			Vue.set(state.conversations[token], 'unreadMessages', unreadMessages)
+		}
+		if (unreadMention !== undefined) {
+			Vue.set(state.conversations[token], 'unreadMention', unreadMention)
+		}
+	},
+
+	setNotificationLevel(state, { token, notificationLevel }) {
+		Vue.set(state.conversations[token], 'notificationLevel', notificationLevel)
+	},
 }
 
 const actions = {
@@ -134,7 +162,7 @@ const actions = {
 			participant: {
 				inCall: conversation.participantFlags,
 				lastPing: conversation.lastPing,
-				sessionId: conversation.sessionId,
+				sessionIds: [conversation.sessionId],
 				participantType: conversation.participantType,
 				attendeeId: conversation.attendeeId,
 				actorType: conversation.actorType,
@@ -152,8 +180,40 @@ const actions = {
 	 * @param {object} token the token of the conversation to be deleted;
 	 */
 	deleteConversation(context, token) {
+		// FIXME: rename to deleteConversationsFromStore or a better name
 		context.dispatch('deleteMessages', token)
 		context.commit('deleteConversation', token)
+	},
+
+	/**
+	 * Delete a conversation from the server.
+	 *
+	 * @param {object} context default store context;
+	 * @param {object} token the token of the conversation to be deleted;
+	 */
+	async deleteConversationFromServer(context, { token }) {
+		await deleteConversation(token)
+		// upon success, also delete from store
+		await context.dispatch('deleteConversation', token)
+	},
+
+	/**
+	 * Delete all the messages from a conversation.
+	 *
+	 * @param {object} context default store context;
+	 * @param {object} token the token of the conversation whose history is
+	 * to be cleared;
+	 */
+	async clearConversationHistory(context, { token }) {
+		try {
+			const response = await clearConversationHistory(token)
+			context.dispatch('deleteMessages', token)
+			return response
+		} catch (error) {
+			console.debug(
+				t('spreed', 'Error while clearing conversation history'),
+				error)
+		}
 	},
 
 	/**
@@ -161,6 +221,7 @@ const actions = {
 	 * @param {object} context default store context;
 	 */
 	purgeConversationsStore(context) {
+		// TODO: also purge messages ??
 		context.commit('purgeConversationsStore')
 	},
 
@@ -187,6 +248,7 @@ const actions = {
 			return
 		}
 
+		// FIXME: logic is reversed
 		if (isFavorite) {
 			await removeFromFavorites(token)
 		} else {
@@ -313,6 +375,79 @@ const actions = {
 		conversation.lastActivity = (new Date().getTime()) / 1000
 
 		commit('addConversation', conversation)
+	},
+
+	async updateConversationLastMessage({ commit }, { token, lastMessage }) {
+		/**
+		 * Only use the last message as lastmessage when:
+		 * 1. It's not a command reply
+		 * 2. It's not a temporary message starting with "/" which is a user posting a command
+		 */
+		if ((lastMessage.actorType !== 'bots'
+				|| lastMessage.actorId === 'changelog')
+			&& ((typeof lastMessage.id.startsWith === 'function' && !lastMessage.id.startsWith('temp-'))
+				|| !lastMessage.message.startsWith('/'))) {
+			commit('updateConversationLastMessage', { token, lastMessage })
+		}
+	},
+
+	async updateConversationLastReadMessage({ commit }, { token, lastReadMessage }) {
+		commit('updateConversationLastReadMessage', { token, lastReadMessage })
+	},
+
+	async fetchConversation({ dispatch }, { token }) {
+		try {
+			dispatch('clearMaintenanceMode')
+			const response = await fetchConversation(token)
+			dispatch('updateTalkVersionHash', response)
+			dispatch('addConversation', response.data.ocs.data)
+			return response
+		} catch (error) {
+			if (error?.response) {
+				dispatch('checkMaintenanceMode', error.response)
+			}
+			throw error
+		}
+	},
+
+	async fetchConversations({ dispatch }) {
+		try {
+			dispatch('clearMaintenanceMode')
+
+			const response = await fetchConversations()
+			dispatch('updateTalkVersionHash', response)
+			dispatch('purgeConversationsStore')
+			response.data.ocs.data.forEach(conversation => {
+				dispatch('addConversation', conversation)
+			})
+			return response
+		} catch (error) {
+			if (error?.response) {
+				dispatch('checkMaintenanceMode', error.response)
+			}
+			throw error
+		}
+	},
+
+	async setNotificationLevel({ commit }, { token, notificationLevel }) {
+		await setNotificationLevel(token, notificationLevel)
+
+		commit('setNotificationLevel', { token, notificationLevel })
+	},
+
+	/**
+	 * Creates a new one to one conversation in the backend
+	 * with the given actor then adds it to the store.
+	 *
+	 * @param {object} context default store context;
+	 * @param {string} actorId actor id;
+	 */
+	async createOneToOneConversation(context, actorId) {
+		const response = await createOneToOneConversation(actorId)
+		const conversation = response.data.ocs.data
+		context.dispatch('addConversation', conversation)
+
+		return conversation
 	},
 }
 

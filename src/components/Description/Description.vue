@@ -22,9 +22,8 @@
 <template>
 	<div ref="description"
 		:key="forceReRenderKey"
-		v-mousedown-outside="handleMouseDownOutside"
 		class="description"
-		:class="{'description--editing': editing, 'description--expanded': expanded}">
+		:class="{'description--editing': editing}">
 		<RichContentEditable
 			ref="contenteditable"
 			:value.sync="descriptionText"
@@ -39,7 +38,7 @@
 			<template v-if="editing">
 				<button
 					class="nc-button nc-button__main description__action"
-					:aria-label="t('spreed','Cancel editing description')"
+					:aria-label="t('spreed', 'Cancel editing description')"
 					@click="handleCancelEditing">
 					<Close
 						decorative
@@ -48,7 +47,7 @@
 				</button>
 				<button
 					class="nc-button nc-button__main primary description__action"
-					:aria-label="t('spreed','Submit conversation description')"
+					:aria-label="t('spreed', 'Submit conversation description')"
 					:disabled="!canSubmit"
 					@click="handleSubmitDescription">
 					<Check
@@ -66,7 +65,7 @@
 			</template>
 			<button v-if="!editing && editable"
 				class="nc-button nc-button__main"
-				:aria-label="t('spreed','Edit conversation description')"
+				:aria-label="t('spreed', 'Edit conversation description')"
 				@click="handleEditDescription">
 				<Pencil
 					decorative
@@ -75,16 +74,6 @@
 			</button>
 		</template>
 		<div v-if="loading" class="icon-loading-small spinner" />
-		<button v-if="!editing && overflows && expanded" class="expand-indicator nc-button nc-button__main" @click="handleClick">
-			<ChevronDown
-				decorative
-				title=""
-				:size="16" />
-		</button>
-		<div v-if="showOverlay"
-			cursor="pointer"
-			class="overlay"
-			@click="handleClick" />
 	</div>
 </template>
 
@@ -92,7 +81,6 @@
 import Pencil from 'vue-material-design-icons/Pencil'
 import Check from 'vue-material-design-icons/Check'
 import Close from 'vue-material-design-icons/Close'
-import ChevronDown from 'vue-material-design-icons/ChevronDown'
 import RichContentEditable from '@nextcloud/vue/dist/Components/RichContenteditable'
 import Tooltip from '@nextcloud/vue/dist/Directives/Tooltip'
 
@@ -103,7 +91,6 @@ export default {
 		Check,
 		Close,
 		RichContentEditable,
-		ChevronDown,
 	},
 
 	directives: {
@@ -172,7 +159,6 @@ export default {
 		return {
 			descriptionText: this.description,
 			forceReRenderKey: 0,
-			expanded: false,
 			overflows: null,
 		}
 	},
@@ -201,34 +187,18 @@ export default {
 				charactersCount: this.charactersCount,
 			})
 		},
-
-		showCollapseButton() {
-			return this.overflows && !this.editing && !this.loading && this.expanded
-		},
-
-		showOverlay() {
-			return this.overflows && !this.editing && !this.loading && !this.expanded
-		},
 	},
 
 	watch: {
 		// Each time the prop changes, reflect the changes in the value stored in this component
 		description(newValue) {
 			this.descriptionText = newValue
-			if (!this.editing) {
-				this.checkOverflow()
-			}
 		},
 		editing(newValue) {
 			if (!newValue) {
 				this.descriptionText = this.description
 			}
 		},
-	},
-	updated() {
-		if (!this.editing && !this.expanded) {
-			this.checkOverflow()
-		}
 	},
 
 	methods: {
@@ -265,21 +235,6 @@ export default {
 			window.getSelection().removeAllRanges()
 		},
 
-		// Expand the description
-		handleClick() {
-			if (this.editing || this.loading) {
-				return
-			} if (this.overflows) {
-				this.expanded = !this.expanded
-			}
-		},
-
-		// Collapse the description or dismiss editing
-		handleMouseDownOutside(event) {
-			this.expanded = false
-			this.$emit('update:editing', false)
-		},
-
 		checkOverflow() {
 			const descriptionHeight = this.$refs.description.clientHeight
 			const contenteditableHeight = this.$refs.contenteditable.$refs.contenteditable.scrollHeight
@@ -291,27 +246,23 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-@import '../../../assets/variables.scss';
-@import '../../../assets/buttons.scss';
+@import '../../assets/variables.scss';
+@import '../../assets/buttons.scss';
 
 .description {
-	margin: -20px 0 8px 8px;
 	display: flex;
 	width: 100%;
 	overflow: hidden;
 	position: relative;
-	max-height: calc(var(--default-line-height) * 3 + 28px);
+	min-height: $clickable-area;
+	align-items: flex-end;
 	&--editing {
 		box-shadow: 0 2px var(--color-primary-element);
 		transition: all 150ms ease-in-out;
 		max-height: unset;
 		align-items: flex-end;
 	}
-	&--expanded {
-		max-height: unset;
-		min-height: $clickable-area * 2;
-		align-items: flex-end;
-	}
+
 	&__header {
 		display: flex;
 		align-items: center;
@@ -346,15 +297,6 @@ export default {
 	margin: 0 0 4px 0;
 }
 
-.expand-indicator {
-	width: $clickable-area;
-	height: $clickable-area;
-	margin: 0 0 4px 0;
-	position: absolute;
-	top: 0;
-	right: 0;
-}
-
 .counter {
 	background-color: var(--color-background-dark);
 	height: 44px;
@@ -366,21 +308,6 @@ export default {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-}
-
-.overlay {
-	background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.5) 75%, rgba(255, 255, 255, 1) 100%);
-	width: 100%;
-	height: 100%;
-	position: absolute;
-	top: 0;
-	right: 0;
-	padding-right: $clickable-area;
-	cursor: pointer;
-
-	body.theme--dark & {
-		background: linear-gradient(180deg, rgba(24, 24, 24, 0) 0%, rgba(24, 24, 24, 0.5) 75%, rgba(24, 24, 24, 1) 100%);
-	}
 }
 
 // Restyle richContentEditable component from our library.

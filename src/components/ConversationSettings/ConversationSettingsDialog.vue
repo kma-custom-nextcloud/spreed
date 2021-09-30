@@ -24,38 +24,74 @@
 		role="dialog"
 		:aria-label="t('spreed', 'Conversation settings')"
 		:open.sync="showSettings"
-		:show-navigation="false">
+		:show-navigation="true"
+		:container="container">
+		<!-- description -->
 		<AppSettingsSection
-			:title="t('spreed', 'Guests access')"
-			class="app-settings-section">
-			<LinkShareSettings ref="linkShareSettings" />
+			v-if="showDescription"
+			:title="t('spreed', 'Description')">
+			<Description
+				:editable="canFullModerate"
+				:description="description"
+				:editing="isEditingDescription"
+				:loading="isDescriptionLoading"
+				:placeholder="t('spreed', 'Enter a description for this conversation')"
+				@submit:description="handleUpdateDescription"
+				@update:editing="handleEditDescription" />
 		</AppSettingsSection>
+
+		<!-- Notifications settings -->
+		<AppSettingsSection
+			:title="t('spreed', 'Chat notifications')">
+			<NotificationsSettings :conversation="conversation" />
+		</AppSettingsSection>
+
+		<!-- Guest access -->
 		<AppSettingsSection
 			v-if="canFullModerate"
-			:title="t('spreed', 'Conversation settings')"
-			class="app-settings-section">
+			:title="t('spreed', 'Guests access')">
+			<LinkShareSettings ref="linkShareSettings" />
+		</AppSettingsSection>
+
+		<!-- TODO sepatate these 2 settings and rename the settings sections
+		all the settings in this component are conversation settings. Proposal:
+		move lock conversation in destructive actions and create a separate
+		section for listablesettings -->
+		<AppSettingsSection
+			v-if="canFullModerate"
+			:title="t('spreed', 'Conversation settings')">
 			<ListableSettings :token="token" />
 			<LockingSettings :token="token" />
 		</AppSettingsSection>
+
+		<!-- Meeting settings -->
 		<AppSettingsSection
 			v-if="canFullModerate"
-			:title="t('spreed', 'Meeting settings')"
-			class="app-settings-section">
+			:title="t('spreed', 'Meeting settings')">
 			<LobbySettings :token="token" />
 			<SipSettings v-if="canUserEnableSIP" />
 		</AppSettingsSection>
 		<AppSettingsSection
 			v-if="canFullModerate && matterbridgeEnabled"
-			:title="t('spreed', 'Matterbridge')"
-			class="app-settings-section">
+			:title="t('spreed', 'Matterbridge')">
 			<MatterbridgeSettings />
+		</AppSettingsSection>
+
+		<!-- Destructive actions -->
+		<AppSettingsSection
+			v-if="canLeaveConversation || canDeleteConversation"
+			:title="t('spreed', 'Danger zone')">
+			<DangerZone
+				:conversation="conversation"
+				:can-leave-conversation="canLeaveConversation"
+				:can-delete-conversation="canDeleteConversation" />
 		</AppSettingsSection>
 	</AppSettingsDialog>
 </template>
 
 <script>
 import { subscribe, unsubscribe } from '@nextcloud/event-bus'
-import { PARTICIPANT } from '../../constants'
+import { PARTICIPANT, CONVERSATION } from '../../constants'
 import AppSettingsDialog from '@nextcloud/vue/dist/Components/AppSettingsDialog'
 import AppSettingsSection from '@nextcloud/vue/dist/Components/AppSettingsSection'
 import LinkShareSettings from './LinkShareSettings'
@@ -65,6 +101,10 @@ import LobbySettings from './LobbySettings'
 import SipSettings from './SipSettings'
 import MatterbridgeSettings from './Matterbridge/MatterbridgeSettings'
 import { loadState } from '@nextcloud/initial-state'
+import DangerZone from './DangerZone'
+import NotificationsSettings from './NotificationsSettings'
+import { showError } from '@nextcloud/dialogs'
+import Description from '../Description/Description'
 
 export default {
 	name: 'ConversationSettingsDialog',
@@ -78,16 +118,26 @@ export default {
 		LockingSettings,
 		SipSettings,
 		MatterbridgeSettings,
+		DangerZone,
+		NotificationsSettings,
+		Description,
 	},
 
 	data() {
 		return {
 			showSettings: false,
 			matterbridgeEnabled: loadState('spreed', 'enable_matterbridge'),
+			isEditingDescription: false,
+			isDescriptionLoading: false,
+
 		}
 	},
 
 	computed: {
+		container() {
+			return this.$store.getters.getMainContainerSelector()
+		},
+
 		canUserEnableSIP() {
 			return this.conversation.canEnableSIP
 		},
@@ -95,19 +145,45 @@ export default {
 		token() {
 			return this.$store.getters.getToken()
 		},
+
 		conversation() {
 			return this.$store.getters.conversation(this.token) || this.$store.getters.dummyConversation
 		},
+
 		participantType() {
 			return this.conversation.participantType
 		},
+
 		canFullModerate() {
-			return this.participantType === PARTICIPANT.TYPE.OWNER || this.participantType === PARTICIPANT.TYPE.MODERATOR
+			return (this.participantType === PARTICIPANT.TYPE.OWNER
+				|| this.participantType === PARTICIPANT.TYPE.MODERATOR)
+				&& this.conversation.type !== CONVERSATION.TYPE.ONE_TO_ONE
+		},
+
+		canDeleteConversation() {
+			return this.conversation.canDeleteConversation
+		},
+
+		canLeaveConversation() {
+			return this.conversation.canLeaveConversation
+		},
+
+		description() {
+			return this.conversation.description
+		},
+
+		showDescription() {
+			if (this.canFullModerate) {
+				return this.conversation.type !== CONVERSATION.TYPE.ONE_TO_ONE
+			} else {
+				return this.description !== ''
+			}
 		},
 	},
 
 	mounted() {
 		subscribe('show-conversation-settings', this.handleShowSettings)
+		subscribe('hide-conversation-settings', this.handleHideSettings)
 	},
 
 	methods: {
@@ -118,8 +194,32 @@ export default {
 			})
 		},
 
+		handleHideSettings() {
+			this.showSettings = false
+		},
+
 		beforeDestroy() {
 			unsubscribe('show-conversation-settings', this.handleShowSettings)
+			unsubscribe('hide-conversation-settings', this.handleHideSettings)
+		},
+
+		async handleUpdateDescription(description) {
+			this.isDescriptionLoading = true
+			try {
+				await this.$store.dispatch('setConversationDescription', {
+					token: this.token,
+					description,
+				})
+				this.isEditingDescription = false
+			} catch (error) {
+				console.error('Error while setting conversation description', error)
+				showError(t('spreed', 'Error while updating conversation description'))
+			}
+			this.isDescriptionLoading = false
+		},
+
+		handleEditDescription(payload) {
+			this.isEditingDescription = payload
 		},
 	},
 }

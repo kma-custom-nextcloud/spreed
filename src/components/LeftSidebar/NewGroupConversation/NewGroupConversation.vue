@@ -22,10 +22,10 @@
 <template>
 	<div class="wrapper">
 		<button slot="trigger"
-			v-tooltip.bottom="t('spreed','Create a new group conversation')"
+			v-tooltip.bottom="t('spreed', 'Create a new group conversation')"
 			class="toggle"
 			icon=""
-			:aria-label="t('spreed','Create a new group conversation')"
+			:aria-label="t('spreed', 'Create a new group conversation')"
 			@click="showModal">
 			<Plus
 				decorative
@@ -35,6 +35,7 @@
 		<!-- New group form -->
 		<Modal
 			v-if="modal"
+			:container="container"
 			@close="closeModal">
 			<!-- Wrapper for content & navigation -->
 			<div
@@ -87,6 +88,13 @@
 				<div
 					class="navigation">
 					<!-- First page -->
+					<button
+						v-if="page===0 && isPublic"
+						class="navigation__button navigation__button-left "
+						:disabled="disabled"
+						@click="handleCreateConversation">
+						{{ t('spreed', 'Create conversation') }}
+					</button>
 					<button
 						v-if="page===0"
 						class="navigation__button navigation__button-right primary"
@@ -184,6 +192,9 @@ export default {
 	},
 
 	computed: {
+		container() {
+			return this.$store.getters.getMainContainerSelector()
+		},
 		// Trims whitespaces from the input string
 		conversationName() {
 			return this.conversationNameInput.trim()

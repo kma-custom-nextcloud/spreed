@@ -25,6 +25,8 @@ namespace OCA\Talk\Chat\SystemMessage;
 
 use OCA\Talk\Chat\ChatManager;
 use OCA\Talk\Events\AddParticipantsEvent;
+use OCA\Talk\Events\AttendeesAddedEvent;
+use OCA\Talk\Events\AttendeesRemovedEvent;
 use OCA\Talk\Events\ModifyLobbyEvent;
 use OCA\Talk\Events\ModifyParticipantEvent;
 use OCA\Talk\Events\ModifyRoomEvent;
@@ -40,14 +42,16 @@ use OCA\Talk\Share\RoomShareProvider;
 use OCA\Talk\TalkSession;
 use OCA\Talk\Webinary;
 use OCP\AppFramework\Utility\ITimeFactory;
+use OCP\EventDispatcher\Event;
 use OCP\EventDispatcher\IEventDispatcher;
+use OCP\EventDispatcher\IEventListener;
 use OCP\IRequest;
 use OCP\IUser;
 use OCP\IUserSession;
 use OCP\Share\IShare;
 use Symfony\Component\EventDispatcher\GenericEvent;
 
-class Listener {
+class Listener implements IEventListener {
 
 	/** @var IRequest */
 	protected $request;
@@ -278,9 +282,15 @@ class Listener {
 				$listener = \OC::$server->query(self::class);
 				$listener->sendSystemMessage($room, 'moderator_promoted', ['user' => $attendee->getActorId()]);
 			} elseif ($event->getNewValue() === Participant::USER) {
-				/** @var self $listener */
-				$listener = \OC::$server->query(self::class);
-				$listener->sendSystemMessage($room, 'moderator_demoted', ['user' => $attendee->getActorId()]);
+				if ($event->getOldValue() === Participant::USER_SELF_JOINED) {
+					/** @var self $listener */
+					$listener = \OC::$server->query(self::class);
+					$listener->sendSystemMessage($room, 'user_added', ['user' => $attendee->getActorId()]);
+				} else {
+					/** @var self $listener */
+					$listener = \OC::$server->query(self::class);
+					$listener->sendSystemMessage($room, 'moderator_demoted', ['user' => $attendee->getActorId()]);
+				}
 			} elseif ($event->getNewValue() === Participant::GUEST_MODERATOR) {
 				/** @var self $listener */
 				$listener = \OC::$server->query(self::class);
@@ -306,13 +316,48 @@ class Listener {
 			$manager = \OC::$server->query(Manager::class);
 
 			$room = $manager->getRoomByToken($share->getSharedWith());
-			$listener->sendSystemMessage($room, 'file_shared', ['share' => $share->getId()]);
+			$metaData = \OC::$server->getRequest()->getParam('talkMetaData') ?? '';
+			$metaData = json_decode($metaData, true);
+			$metaData = is_array($metaData) ? $metaData : [];
+
+			if (isset($metaData['messageType']) && $metaData['messageType'] === 'voice-message') {
+				if ($share->getNode()->getMimeType() !== 'audio/mpeg'
+					&& $share->getNode()->getMimeType() !== 'audio/wav') {
+					unset($metaData['messageType']);
+				}
+			}
+
+			$listener->sendSystemMessage($room, 'file_shared', ['share' => $share->getId(), 'metaData' => $metaData]);
 		};
 		/**
 		 * @psalm-suppress UndefinedClass
 		 */
 		$dispatcher->addListener('OCP\Share::postShare', $listener);
 		$dispatcher->addListener(RoomShareProvider::class . '::' . 'share_file_again', $listener);
+	}
+
+	public function handle(Event $event): void {
+		if ($event instanceof AttendeesAddedEvent) {
+			$this->attendeesAddedEvent($event);
+		} elseif ($event instanceof AttendeesRemovedEvent) {
+			$this->attendeesRemovedEvent($event);
+		}
+	}
+
+	protected function attendeesAddedEvent(AttendeesAddedEvent $event): void {
+		foreach ($event->getAttendees() as $attendee) {
+			if ($attendee->getActorType() === Attendee::ACTOR_GROUPS) {
+				$this->sendSystemMessage($event->getRoom(), 'group_added', ['group' => $attendee->getActorId()]);
+			}
+		}
+	}
+
+	protected function attendeesRemovedEvent(AttendeesRemovedEvent $event): void {
+		foreach ($event->getAttendees() as $attendee) {
+			if ($attendee->getActorType() === Attendee::ACTOR_GROUPS) {
+				$this->sendSystemMessage($event->getRoom(), 'group_removed', ['group' => $attendee->getActorId()]);
+			}
+		}
 	}
 
 	protected function sendSystemMessage(Room $room, string $message, array $parameters = [], Participant $participant = null): void {

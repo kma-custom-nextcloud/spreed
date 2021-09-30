@@ -37,6 +37,7 @@ import router from './router/router'
 // Utils
 import { generateFilePath } from '@nextcloud/router'
 import { getRequestToken } from '@nextcloud/auth'
+import { emit } from '@nextcloud/event-bus'
 
 // Directives
 import VueClipboard from 'vue-clipboard2'
@@ -44,9 +45,16 @@ import { translate, translatePlural } from '@nextcloud/l10n'
 import VueObserveVisibility from 'vue-observe-visibility'
 import VueShortKey from 'vue-shortkey'
 import vOutsideEvents from 'vue-outside-events'
+import Tooltip from '@nextcloud/vue/dist/Directives/Tooltip'
 
 // Styles
 import '@nextcloud/dialogs/styles/toast.scss'
+import 'leaflet/dist/leaflet.css'
+
+// Leaflet icon patch
+import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.webpack.css' // Re-uses images from ~leaflet package
+// eslint-disable-next-line
+import 'leaflet-defaulticon-compatibility'
 
 // CSP config for webpack dynamic chunk loading
 // eslint-disable-next-line
@@ -70,6 +78,9 @@ Vue.use(VueClipboard)
 Vue.use(VueObserveVisibility)
 Vue.use(VueShortKey, { prevent: ['input', 'textarea', 'div'] })
 Vue.use(vOutsideEvents)
+
+Tooltip.options.defaultContainer = '#content-vue'
+store.dispatch('setMainContainerSelector', '#content-vue')
 
 const instance = new Vue({
 	el: '#content',
@@ -112,6 +123,8 @@ const waitForSidebarToBeOpen = function(sidebarElement, resolve) {
 
 			sidebarElement.removeEventListener('transitionend', resolveOnceSidebarWidthHasChanged)
 
+			emit('files:sidebar:opened')
+
 			resolve()
 		}
 
@@ -124,6 +137,8 @@ const waitForSidebarToBeOpen = function(sidebarElement, resolve) {
 		setTimeout(() => {
 			console.debug('ontransitionend is not supported; the sidebar should have been fully shown by now')
 
+			emit('files:sidebar:opened')
+
 			resolve()
 		}, Number.parseInt(animationQuickValue) + 200)
 	}
@@ -132,6 +147,8 @@ const waitForSidebarToBeOpen = function(sidebarElement, resolve) {
 Sidebar.prototype.open = function(path) {
 	// The sidebar is already open, so this can return immediately.
 	if (this.state.file) {
+		emit('files:sidebar:opened')
+
 		return
 	}
 
@@ -150,6 +167,10 @@ Sidebar.prototype.open = function(path) {
 Sidebar.prototype.close = function() {
 	store.dispatch('hideSidebar')
 	this.state.file = ''
+}
+Sidebar.prototype.setFullScreenMode = function(isFullScreen) {
+	// Sidebar style is not changed in Talk when the viewer is opened; this is
+	// needed only for compatibility with OCA.Files.Sidebar interface.
 }
 
 Object.assign(window.OCA.Files, {

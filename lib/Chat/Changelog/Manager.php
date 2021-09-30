@@ -91,7 +91,7 @@ class Manager {
 			),
 			$this->l->t('New in Talk %s', ['6']),
 			$this->l->t('- Microsoft Edge and Safari can now be used to participate in audio and video calls'),
-			$this->l->t('- One-to-one conversations are now persistent and can not be turned into group conversations by accident anymore. Also when one of the participants leaves the conversation, the conversation is not automatically deleted anymore. Only if both participants leave, the conversation is deleted from the server'),
+			$this->l->t('- One-to-one conversations are now persistent and cannot be turned into group conversations by accident anymore. Also when one of the participants leaves the conversation, the conversation is not automatically deleted anymore. Only if both participants leave, the conversation is deleted from the server'),
 			$this->l->t('- You can now notify all participants by posting "@all" into the chat'),
 			$this->l->t('- With the "arrow-up" key you can repost your last message'),
 			$this->l->t('- Talk can now have commands, send "/help" as a chat message to see if your administrator configured some'),
@@ -115,6 +115,10 @@ class Manager {
 			$this->l->t('- Give your conversations some context with a description and open it up so logged in users can find it and join themselves'),
 			$this->l->t('- See a read status and send failed messages again'),
 			$this->l->t('- Raise your hand in a call with the R key'),
+			$this->l->t('New in Talk %s', ['12']),
+			$this->l->t('- Join the same conversation and call from multiple devices'),
+			$this->l->t('- Send voice messages, share your location or contact details'),
+			$this->l->t('- Add groups to a conversation and new group members will automatically be added as participants'),
 		];
 	}
 }

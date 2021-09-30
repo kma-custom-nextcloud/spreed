@@ -1,6 +1,42 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## 12.2.0 – 2021-09-17
+
+### Added
+- Add "Create conversation" button on first page of dialog when creating a public conversation
+  [#6206](https://github.com/nextcloud/spreed/pull/6206)
+
+### Fixed
+- Add some validation for shared geo-locations
+  [#6242](https://github.com/nextcloud/spreed/pull/6242)
+- Move unreadMessageElement from computed to a method
+  [#6241](https://github.com/nextcloud/spreed/pull/6241)
+- Fix logged-in users are unable to join a password protected public conversation
+  [#6230](https://github.com/nextcloud/spreed/pull/6230)
+- Don't toggle the video on/off when pasting files into the chat and first releasing the CTRL key
+  [#6198](https://github.com/nextcloud/spreed/pull/6198)
+- Disable recording voice messages on readonly conversations
+  [#6182](https://github.com/nextcloud/spreed/pull/6182)
+
+## 12.1.2 – 2021-09-17
+
+### Fixed
+- Add some validation for shared geo-locations
+  [#6243](https://github.com/nextcloud/spreed/pull/6243)
+- Fix logged-in users are unable to join a password protected public conversation
+  [#6229](https://github.com/nextcloud/spreed/pull/6229)
+- Don't toggle the video on/off when pasting files into the chat and first releasing the CTRL key
+  [#6199](https://github.com/nextcloud/spreed/pull/6199)
+- Fix blocked audio recording preview when Talk is embedded in the sidebar
+  [#6130](https://github.com/nextcloud/spreed/pull/6130)
+- Fix infinite loop when the media constraints can not be decreased
+  [#6126](https://github.com/nextcloud/spreed/pull/6126)
+- Fix connection quality warning not disappearing when media is stopped
+  [#6146](https://github.com/nextcloud/spreed/pull/6146)
+- Send offer again when own peer was not initially connected
+  [#6080](https://github.com/nextcloud/spreed/pull/6080)
+
 ## 11.3.2 – 2021-09-17
 
 ### Fixed
@@ -33,6 +69,65 @@ All notable changes to this project will be documented in this file.
 - Fix infinite loop when the media constraints can not be decreased
   [#6128](https://github.com/nextcloud/spreed/pull/6128)
 
+## 12.1.1 – 2021-08-30
+
+### Changed
+- Improved device preference storing to better recover after switching between docking-station and normal usage with a device
+  [#6179](https://github.com/nextcloud/spreed/pull/6179)
+
+### Fixed
+- Fix laggy video with Full HD 60 FPS webcams in Chrome and Chromium
+  [#6159](https://github.com/nextcloud/spreed/pull/6159)
+- Fix infinite loop when video constrains can not be satisfied
+  [#6125](https://github.com/nextcloud/spreed/pull/6125)
+- Fix connection quality warning after media was stopped
+  [#6147](https://github.com/nextcloud/spreed/pull/6147)
+- Hide forward action for guests
+  [#6143](https://github.com/nextcloud/spreed/pull/6143)
+- Don't select the own video when trying to open the video settings
+  [#6158](https://github.com/nextcloud/spreed/pull/6158)
+- Fix issues with several popovers in fullscreen mode or sidebar mode
+  [#6155](https://github.com/nextcloud/spreed/pull/6155)
+- Fix issue with video recording in sidebar mode
+  [#6129](https://github.com/nextcloud/spreed/pull/6129)
+  [#6131](https://github.com/nextcloud/spreed/pull/6131)
+
+## 12.1.0 – 2021-08-10
+### Added
+- Allow to forward messages to another chat
+  [#6053](https://github.com/nextcloud/spreed/pull/6053)
+  [#6057](https://github.com/nextcloud/spreed/pull/6057)
+  [#6076](https://github.com/nextcloud/spreed/pull/6076)
+- Allow to clear chat history
+  [#6052](https://github.com/nextcloud/spreed/pull/6052)
+  [#5971](https://github.com/nextcloud/spreed/pull/5971)
+
+### Changed
+- Add "missed call" chat system message for one-to-one calls
+  [#6031](https://github.com/nextcloud/spreed/pull/6031)
+
+### Fixed
+- Remove div tags when pasting or writing multiline messages in Safari
+  [#6086](https://github.com/nextcloud/spreed/pull/6086)
+- Add list of "What's new in Talk 12"
+  [#6050](https://github.com/nextcloud/spreed/pull/6050)
+
+## 12.0.1 – 2021-07-15
+### Fixed
+- Unshare all items directly when deleting a room
+  [#5975](https://github.com/nextcloud/spreed/pull/5975)
+- Fix date picker for lobby not being visible
+  [#5984](https://github.com/nextcloud/spreed/pull/5984)
+- Fix initial camera quality with Chromium and Chromebased browsers
+  [#6000](https://github.com/nextcloud/spreed/pull/6000)
+- Wait for the wav encoder to be initialized before allowing recordings
+  [#6012](https://github.com/nextcloud/spreed/pull/6012)
+  [#6014](https://github.com/nextcloud/spreed/pull/6014)
+- Fix displaying moderation options in one-to-ones
+  [#6008](https://github.com/nextcloud/spreed/pull/6008)
+- Never show read marker on the very last message
+  [#5969](https://github.com/nextcloud/spreed/pull/5969)
+
 ## 11.3.1 – 2021-07-15
 ### Fixed
 - Add UI feedback when local participant is not connected
@@ -60,6 +155,48 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Fix connection quality stats not reset when setting a new peer connection
   [#5769](https://github.com/nextcloud/spreed/pull/5769)
+
+## 12.0.0 – 2021-07-06
+### Added
+- Add support for simulcast streams when the high-performance backend is used
+  [#5535](https://github.com/nextcloud/spreed/pull/5535)
+- Allow users to have multiple session in the same conversation
+  [#5194](https://github.com/nextcloud/spreed/pull/5194)
+- Voice messages, location sharing and contacts sharing
+  [#5610](https://github.com/nextcloud/spreed/pull/5610)
+  [#5573](https://github.com/nextcloud/spreed/pull/5573)
+  [#5731](https://github.com/nextcloud/spreed/pull/5731)
+- Play a sound when a participant joins or leaves the call
+  [#5410](https://github.com/nextcloud/spreed/pull/5410)
+- Add unread message marker in the chat view
+  [#3825](https://github.com/nextcloud/spreed/pull/3825)
+- Show a "new message" indicator while being in the call
+  [#5534](https://github.com/nextcloud/spreed/pull/5534)
+- Sync group members with conversation participants
+  [#4810](https://github.com/nextcloud/spreed/pull/4810)
+- Add an option to reply privately
+  [#4855](https://github.com/nextcloud/spreed/pull/4855)
+- Conversation TopBar with icon, name and description
+  [#5596](https://github.com/nextcloud/spreed/pull/5596)
+
+### Changed
+- Use all defined STUN and TURN servers instead of a random one
+  [#5503](https://github.com/nextcloud/spreed/pull/5503)
+  [#5491](https://github.com/nextcloud/spreed/pull/5491)
+- Compatibility with Nextcloud 22
+
+### Fixed
+- Allow to mention groupfolder users in file chats
+  [#4246](https://github.com/nextcloud/spreed/pull/4246)
+- Fix not sending signaling messages to participants without a Peer object
+  [#4686](https://github.com/nextcloud/spreed/pull/4686)
+- Fix several issues with video, stream and screenshare selections
+
+### Removed
+- 🏁 Conversations API v1, v2 and v3
+- 🏁 Call API v1, v2 and v3
+- 🏁 Signaling API v1 and v2
+- 🏁 Support for Internet Explorer
 
 ## 11.3.0 – 2021-06-04
 ### Fixed
@@ -244,7 +381,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Bring up the conversation creation-dialog when clicking on a group to prevent accidentally spam
   [#5062](https://github.com/nextcloud/spreed/pull/5062)
-- User different border color when own message is quoted
+- Use different border color when own message is quoted
   [#4940](https://github.com/nextcloud/spreed/pull/4940)
 - Move matterbridge settings into the conversation settings dialog
   [#4907](https://github.com/nextcloud/spreed/pull/4907)
@@ -294,7 +431,7 @@ All notable changes to this project will be documented in this file.
 - Add upload editor in files sidebar mode
   [#5111](https://github.com/nextcloud/spreed/pull/5111)
 
-## 9.0.8 – 2021-02-22
+## 9.0.9 – 2021-02-22
 ### Fixed
 - Fix collaboration resource options not loading
   [#5143](https://github.com/nextcloud/spreed/pull/5143)

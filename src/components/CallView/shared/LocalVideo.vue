@@ -58,10 +58,11 @@
 			<LocalMediaControls
 				v-if="showControls"
 				class="local-media-controls"
+				:token="token"
 				:model="localMediaModel"
 				:local-call-participant-model="localCallParticipantModel"
 				:screen-sharing-button-hidden="isSidebar"
-				@switch-screen-to-id="$emit('switchScreenToId', $event)" />
+				@switch-screen-to-id="switchScreenToId($event)" />
 		</transition>
 		<div v-if="mouseover && isSelectable" class="hover-shadow" />
 		<div class="bottom-bar">
@@ -103,6 +104,10 @@ export default {
 	mixins: [video],
 
 	props: {
+		token: {
+			type: String,
+			required: true,
+		},
 		localMediaModel: {
 			type: Object,
 			required: true,
@@ -151,7 +156,7 @@ export default {
 		videoContainerClass() {
 			return {
 				'not-connected': this.isNotConnected,
-				'speaking': this.localMediaModel.attributes.speaking,
+				speaking: this.localMediaModel.attributes.speaking,
 				'video-container-grid': this.isGrid,
 				'video-container-stripe': this.isStripe,
 				'video-container-big': this.isBig,
@@ -226,7 +231,7 @@ export default {
 		localCallParticipantModel: {
 			immediate: true,
 
-			handler: function(localCallParticipantModel, oldLocalCallParticipantModel) {
+			handler(localCallParticipantModel, oldLocalCallParticipantModel) {
 				if (oldLocalCallParticipantModel) {
 					oldLocalCallParticipantModel.off('forcedMute', this._handleForcedMute)
 				}
@@ -237,14 +242,14 @@ export default {
 			},
 		},
 
-		'localMediaModel.attributes.localStream': function(localStream) {
+		'localMediaModel.attributes.localStream'(localStream) {
 			this._setLocalStream(localStream)
 		},
 
 		localStreamVideoError: {
 			immediate: true,
 
-			handler: function(error) {
+			handler(error) {
 				if (error) {
 					if (error.name === 'NotAllowedError') {
 						this.notificationHandle = showError(t('spreed', 'Access to camera was denied'))
@@ -308,6 +313,10 @@ export default {
 		handleStopFollowing() {
 			this.$store.dispatch('selectedVideoPeerId', null)
 			this.$store.dispatch('stopPresentation')
+		},
+
+		switchScreenToId(id) {
+			this.$emit('switch-screen-to-id', id)
 		},
 	},
 

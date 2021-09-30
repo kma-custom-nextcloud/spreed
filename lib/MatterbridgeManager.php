@@ -23,28 +23,29 @@ declare(strict_types=1);
 
 namespace OCA\Talk;
 
-use OCA\Talk\Exceptions\RoomNotFoundException;
-use OCA\Talk\Model\Attendee;
-use OCA\Talk\Service\ParticipantService;
-use OCP\IConfig;
-use OCP\IDBConnection;
-use OCP\DB\QueryBuilder\IQueryBuilder;
-use OCP\IUserManager;
-use OCP\IURLGenerator;
 use OC\Authentication\Token\IProvider as IAuthTokenProvider;
 use OC\Authentication\Token\IToken;
-use OCP\Security\ISecureRandom;
-use OCP\IAvatarManager;
-use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
-use Psr\Log\LoggerInterface;
-use OCP\AppFramework\Utility\ITimeFactory;
-
-use OCA\Talk\Exceptions\ImpossibleToKillException;
-use OCA\Talk\Exceptions\WrongPermissionsException;
-use OCA\Talk\Exceptions\ParticipantNotFoundException;
 use OCA\Talk\Chat\ChatManager;
+use OCA\Talk\Exceptions\ImpossibleToKillException;
+use OCA\Talk\Exceptions\ParticipantNotFoundException;
+use OCA\Talk\Exceptions\RoomNotFoundException;
+use OCA\Talk\Exceptions\WrongPermissionsException;
+use OCA\Talk\Model\Attendee;
+use OCA\Talk\Service\ParticipantService;
+use OCP\AppFramework\Utility\ITimeFactory;
+use OCP\DB\Exception;
+use OCP\DB\QueryBuilder\IQueryBuilder;
+use OCP\IAvatarManager;
+use OCP\IConfig;
+use OCP\IDBConnection;
+use OCP\IURLGenerator;
+use OCP\IUserManager;
+use OCP\Security\ISecureRandom;
+use Psr\Log\LoggerInterface;
 
 class MatterbridgeManager {
+	public const BRIDGE_BOT_USERID = 'bridge-bot';
+
 	/** @var IDBConnection */
 	private $db;
 	/** @var IConfig */
@@ -202,7 +203,7 @@ class MatterbridgeManager {
 			->from('talk_bridges')
 			->where($query->expr()->eq('enabled', $query->createNamedParameter(1, IQueryBuilder::PARAM_INT)));
 
-		$result = $query->execute();
+		$result = $query->executeQuery();
 		while ($row = $result->fetch()) {
 			$bridge = [
 				'enabled' => (bool) $row['enabled'],
@@ -251,6 +252,11 @@ class MatterbridgeManager {
 		// TODO adapt that to use appData
 		$configPath = sprintf('/tmp/bridge-%s.toml', $room->getToken());
 		$configContent = $this->generateConfig($newBridge);
+
+		// Create the config file and set permissions on it
+		touch($configPath);
+		chmod($configPath, 0600);
+
 		file_put_contents($configPath, $configContent);
 	}
 
@@ -284,23 +290,22 @@ class MatterbridgeManager {
 	 * @return array Bot user information (username and app token). token is an empty string if creation was not asked.
 	 */
 	private function checkBotUser(Room $room, bool $isBridgeEnabled): array {
-		$botUserId = 'bridge-bot';
 		// check if user exists and create it if necessary
-		if (!$this->userManager->userExists($botUserId)) {
+		if (!$this->userManager->userExists(self::BRIDGE_BOT_USERID)) {
 			$pass = $this->generatePassword();
 			$this->config->setAppValue('spreed', 'bridge_bot_password', $pass);
-			$botUser = $this->userManager->createUser($botUserId, $pass);
+			$botUser = $this->userManager->createUser(self::BRIDGE_BOT_USERID, $pass);
 			// set avatar
-			$avatar = $this->avatarManager->getAvatar($botUserId);
+			$avatar = $this->avatarManager->getAvatar(self::BRIDGE_BOT_USERID);
 			$imageData = file_get_contents(\OC::$SERVERROOT . '/apps/spreed/img/bridge-bot.png');
 			$avatar->set($imageData);
 		} else {
-			$botUser = $this->userManager->get($botUserId);
+			$botUser = $this->userManager->get(self::BRIDGE_BOT_USERID);
 		}
 
 		// check if the bot user is member of the room and add or remove it
 		try {
-			$participant = $room->getParticipant($botUserId);
+			$room->getParticipant(self::BRIDGE_BOT_USERID, false);
 			if (!$isBridgeEnabled) {
 				$this->participantService->removeUser($room, $botUser, Room::PARTICIPANT_REMOVED);
 			}
@@ -308,7 +313,8 @@ class MatterbridgeManager {
 			if ($isBridgeEnabled) {
 				$this->participantService->addUsers($room, [[
 					'actorType' => Attendee::ACTOR_USERS,
-					'actorId' => $botUserId,
+					'actorId' => self::BRIDGE_BOT_USERID,
+					'displayName' => $botUser->getDisplayName(),
 					'participantType' => Participant::USER,
 				]]);
 			}
@@ -316,10 +322,10 @@ class MatterbridgeManager {
 
 		// delete old bot app tokens for this room
 		$tokenName = 'spreed_' . $room->getToken();
-		$tokens = $this->tokenProvider->getTokenByUser($botUserId);
+		$tokens = $this->tokenProvider->getTokenByUser(self::BRIDGE_BOT_USERID);
 		foreach ($tokens as $t) {
 			if ($t->getName() === $tokenName) {
-				$this->tokenProvider->invalidateTokenById($botUserId, $t->getId());
+				$this->tokenProvider->invalidateTokenById(self::BRIDGE_BOT_USERID, $t->getId());
 			}
 		}
 
@@ -329,8 +335,8 @@ class MatterbridgeManager {
 			$botPassword = $this->config->getAppValue('spreed', 'bridge_bot_password', '');
 			$generatedToken = $this->tokenProvider->generateToken(
 				$appToken,
-				$botUserId,
-				$botUserId,
+				self::BRIDGE_BOT_USERID,
+				self::BRIDGE_BOT_USERID,
 				$botPassword,
 				$tokenName,
 				IToken::PERMANENT_TOKEN,
@@ -341,7 +347,7 @@ class MatterbridgeManager {
 		}
 
 		return [
-			'id' => $botUserId,
+			'id' => self::BRIDGE_BOT_USERID,
 			'password' => $appToken,
 		];
 	}
@@ -426,6 +432,9 @@ class MatterbridgeManager {
 				$content .= sprintf('	Server = "%s"', $part['server']) . "\n";
 				$content .= sprintf('	Login = "%s"', $part['login']) . "\n";
 				$content .= sprintf('	Password = "%s"', $part['password']) . "\n";
+				if ($part['skiptls']) {
+					$content .= sprintf('	SkipTLSVerify = true') . "\n";
+				}
 				$content .= '	PrefixMessagesWithNick = true' . "\n";
 				$content .= '	RemoteNickFormat = "[{PROTOCOL}] <{NICK}> "' . "\n\n";
 			} elseif ($type === 'slack') {
@@ -498,6 +507,9 @@ class MatterbridgeManager {
 				$content .= sprintf('	Password = "%s"', $part['password']) . "\n";
 				$content .= sprintf('	Muc = "%s"', $part['muc']) . "\n";
 				$content .= sprintf('	Nick = "%s"', $part['nick']) . "\n";
+				if ($part['skiptls']) {
+					$content .= sprintf('	SkipTLSVerify = true') . "\n";
+				}
 				$content .= '	PrefixMessagesWithNick = true' . "\n";
 				$content .= '	RemoteNickFormat = "[{PROTOCOL}] <{NICK}> "' . "\n\n";
 			}
@@ -701,6 +713,11 @@ class MatterbridgeManager {
 		$outputPath = sprintf('/tmp/bridge-%s.log', $room->getToken());
 		$matterbridgeCmd = sprintf('%s -conf %s', $binaryPath, $configPath);
 		$cmd = sprintf('nice -n19 %s > %s 2>&1 & echo $!', $matterbridgeCmd, $outputPath);
+
+		// Create the log file and set permissions on it
+		touch($outputPath);
+		chmod($outputPath, 0600);
+
 		$cmdResult = $this->runCommand($cmd);
 		if (!is_null($cmdResult) && $cmdResult['return_code'] === 0 && is_numeric($cmdResult['stdout'] ?? 0)) {
 			return (int) $cmdResult['stdout'];
@@ -749,7 +766,7 @@ class MatterbridgeManager {
 			->where($query->expr()->eq('enabled', $query->createNamedParameter(1, IQueryBuilder::PARAM_INT)))
 			->andWhere($query->expr()->gt('pid', $query->createNamedParameter(0, IQueryBuilder::PARAM_INT)));
 
-		$result = $query->execute();
+		$result = $query->executeQuery();
 		while ($row = $result->fetch()) {
 			$expectedPidList[] = (int) $row['pid'];
 		}
@@ -831,7 +848,7 @@ class MatterbridgeManager {
 	/**
 	 * Stop all bridges
 	 *
-	 * @return bool success
+	 * @return bool If bridges where stopped
 	 */
 	public function stopAllBridges(): bool {
 		$query = $this->db->getQueryBuilder();
@@ -839,11 +856,11 @@ class MatterbridgeManager {
 		$query->update('talk_bridges')
 			->set('enabled', $query->createNamedParameter(0, IQueryBuilder::PARAM_INT))
 			->set('pid', $query->createNamedParameter(0, IQueryBuilder::PARAM_INT));
-		$query->execute();
+		$result = $query->executeStatement();
 
 		// finally kill all potential zombie matterbridge processes
 		$this->killZombieBridges(true);
-		return true;
+		return $result !== 0;
 	}
 
 	/**
@@ -862,7 +879,7 @@ class MatterbridgeManager {
 				$qb->expr()->eq('room_id', $qb->createNamedParameter($roomId, IQueryBuilder::PARAM_INT))
 			)
 			->setMaxResults(1);
-		$result = $qb->execute();
+		$result = $qb->executeQuery();
 		$enabled = false;
 		$pid = 0;
 		$jsonValues = '[]';
@@ -899,17 +916,23 @@ class MatterbridgeManager {
 					'enabled' => $qb->createNamedParameter($intEnabled, IQueryBuilder::PARAM_INT),
 					'pid' => $qb->createNamedParameter($bridge['pid'], IQueryBuilder::PARAM_INT),
 				]);
-			$qb->execute();
-		} catch (UniqueConstraintViolationException $e) {
-			$qb = $this->db->getQueryBuilder();
-			$qb->update('talk_bridges');
-			$qb->set('json_values', $qb->createNamedParameter($jsonValues, IQueryBuilder::PARAM_STR));
-			$qb->set('enabled', $qb->createNamedParameter($intEnabled, IQueryBuilder::PARAM_INT));
-			$qb->set('pid', $qb->createNamedParameter($bridge['pid'], IQueryBuilder::PARAM_INT));
-			$qb->where(
-				$qb->expr()->eq('room_id', $qb->createNamedParameter($roomId, IQueryBuilder::PARAM_INT))
-			);
-			$qb->execute();
+			$qb->executeStatement();
+		} catch (Exception $e) {
+			if ($e->getReason() === Exception::REASON_UNIQUE_CONSTRAINT_VIOLATION) {
+				$qb = $this->db->getQueryBuilder();
+				$qb->update('talk_bridges');
+				$qb->set('json_values', $qb->createNamedParameter($jsonValues, IQueryBuilder::PARAM_STR));
+				$qb->set('enabled', $qb->createNamedParameter($intEnabled, IQueryBuilder::PARAM_INT));
+				$qb->set('pid', $qb->createNamedParameter($bridge['pid'], IQueryBuilder::PARAM_INT));
+				$qb->where(
+					$qb->expr()->eq('room_id', $qb->createNamedParameter($roomId, IQueryBuilder::PARAM_INT))
+				);
+				$qb->executeStatement();
+			} else {
+				$this->logger->error($e->getMessage(), [
+					'exception' => $e,
+				]);
+			}
 		}
 	}
 

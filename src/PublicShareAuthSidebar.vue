@@ -29,7 +29,7 @@
 			</div>
 			<template v-else>
 				<CallView :token="token" :is-sidebar="true" />
-				<ChatView :token="token" />
+				<ChatView />
 			</template>
 		</aside>
 	</transition>
@@ -40,16 +40,15 @@ import { getCurrentUser } from '@nextcloud/auth'
 import { loadState } from '@nextcloud/initial-state'
 import CallView from './components/CallView/CallView'
 import ChatView from './components/ChatView'
-import { PARTICIPANT } from './constants'
 import { EventBus } from './services/EventBus'
-import { fetchConversation } from './services/conversationsService'
 import {
-	joinConversation,
 	leaveConversationSync,
 } from './services/participantsService'
 import { signalingKill } from './utils/webrtc/index'
 import sessionIssueHandler from './mixins/sessionIssueHandler'
 import talkHashCheck from './mixins/talkHashCheck'
+import { register } from 'extendable-media-recorder'
+import { connect } from 'extendable-media-recorder-wav-encoder'
 
 export default {
 
@@ -100,6 +99,11 @@ export default {
 		},
 	},
 
+	async mounted() {
+		// Initialise audiorecorder encoder
+		register(await connect())
+	},
+
 	beforeMount() {
 		window.addEventListener('unload', () => {
 			console.info('Navigating away, leaving conversation')
@@ -121,7 +125,7 @@ export default {
 				this.$store.dispatch('setCurrentUser', getCurrentUser())
 			}
 
-			await joinConversation(this.token)
+			await this.$store.dispatch('joinConversation', { token: this.token })
 
 			// Fetching the conversation needs to be done once the user has
 			// joined the conversation (otherwise only limited data would be
@@ -155,7 +159,6 @@ export default {
 			await this.$store.dispatch('joinCall', {
 				token: this.token,
 				participantIdentifier: this.$store.getters.getParticipantIdentifier(),
-				flags: PARTICIPANT.CALL_FLAG.IN_CALL,
 			})
 		},
 
@@ -165,16 +168,17 @@ export default {
 			}
 
 			try {
-				const response = await fetchConversation(this.token)
-				this.$store.dispatch('addConversation', response.data.ocs.data)
-				this.$store.dispatch('markConversationRead', this.token)
+				await this.$store.dispatch('fetchConversation', { token: this.token })
 
 				// Although the current participant is automatically added to
 				// the participants store it must be explicitly set in the
 				// actors store.
 				if (!this.$store.getters.getUserId()) {
+					// Set the current actor/participant for guests
+					const conversation = this.$store.getters.conversation(this.token)
+
 					// Setting a guest only uses "sessionId" and "participantType".
-					this.$store.dispatch('setCurrentParticipant', response.data.ocs.data)
+					this.$store.dispatch('setCurrentParticipant', conversation)
 				}
 			} catch (exception) {
 				window.clearInterval(this.fetchCurrentConversationIntervalId)

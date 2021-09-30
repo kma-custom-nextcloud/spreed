@@ -20,19 +20,23 @@
 -->
 
 <template>
-	<AppContentListItem
+	<ListItem
 		:title="item.displayName"
 		:anchor-id="`conversation_${item.token}`"
-		:to="item.token ? { name: 'conversation', params: { token: item.token }} : ''"
-		:class="{ 'has-unread-messages': item.unreadMessages }"
+		:active="isActive"
+		:to="to"
+		:bold="!!item.unreadMessages"
+		:counter-number="item.unreadMessages"
+		:counter-highlighted="counterShouldBePrimary"
 		@click="onClick">
-		<template v-slot:icon>
+		<template #icon>
 			<ConversationIcon
 				:item="item"
 				:hide-favorite="false"
-				:hide-call="false" />
+				:hide-call="false"
+				:disable-menu="true" />
 		</template>
-		<template v-slot:subtitle>
+		<template #subtitle>
 			<strong v-if="item.unreadMessages">
 				{{ conversationInformation }}
 			</strong>
@@ -40,12 +44,6 @@
 				{{ conversationInformation }}
 			</template>
 		</template>
-		<AppNavigationCounter v-if="item.unreadMessages"
-			slot="counter"
-			class="counter"
-			:highlighted="counterShouldBePrimary">
-			<strong>{{ item.unreadMessages }}</strong>
-		</AppNavigationCounter>
 		<template v-if="!isSearchResult" slot="actions">
 			<ActionButton v-if="canFavorite"
 				:icon="iconFavorite"
@@ -57,11 +55,22 @@
 				@click.stop.prevent="copyLinkToConversation">
 				{{ t('spreed', 'Copy link') }}
 			</ActionButton>
+			<ActionButton
+				:close-after-click="true"
+				@click.prevent.exact="markConversationAsRead">
+				<template #icon>
+					<EyeOutline
+						decorative
+						title=""
+						:size="16" />
+				</template>
+				{{ t('spreed', 'Mark as read') }}
+			</ActionButton>
 
 			<ActionSeparator />
-
-			<ActionText
+			<ActionCaption
 				:title="t('spreed', 'Chat notifications')" />
+
 			<ActionButton
 				:class="{'forced-active': isNotifyAlways}"
 				icon="icon-sound"
@@ -97,34 +106,29 @@
 				{{ t('spreed', 'Delete conversation') }}
 			</ActionButton>
 		</template>
-	</AppContentListItem>
+	</ListItem>
 </template>
 
 <script>
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import ActionButton from '@nextcloud/vue/dist/Components/ActionButton'
 import ActionSeparator from '@nextcloud/vue/dist/Components/ActionSeparator'
-import ActionText from '@nextcloud/vue/dist/Components/ActionText'
-import AppContentListItem from './AppContentListItem/AppContentListItem'
-import AppNavigationCounter from '@nextcloud/vue/dist/Components/AppNavigationCounter'
+import ActionCaption from '@nextcloud/vue/dist/Components/ActionCaption'
+import EyeOutline from 'vue-material-design-icons/EyeOutline'
 import ConversationIcon from './../../ConversationIcon'
-import { removeCurrentUserFromConversation } from '../../../services/participantsService'
-import {
-	deleteConversation,
-	setNotificationLevel,
-} from '../../../services/conversationsService'
 import { generateUrl } from '@nextcloud/router'
-import { CONVERSATION, PARTICIPANT } from '../../../constants'
+import { CONVERSATION, PARTICIPANT, ATTENDEE } from '../../../constants'
+import ListItem from '@nextcloud/vue/dist/Components/ListItem'
 
 export default {
 	name: 'Conversation',
 	components: {
 		ActionButton,
 		ActionSeparator,
-		ActionText,
-		AppContentListItem,
-		AppNavigationCounter,
+		ActionCaption,
+		ListItem,
 		ConversationIcon,
+		EyeOutline,
 	},
 	props: {
 		isSearchResult: {
@@ -133,7 +137,7 @@ export default {
 		},
 		item: {
 			type: Object,
-			default: function() {
+			default() {
 				return {
 					token: '',
 					participants: [],
@@ -150,9 +154,11 @@ export default {
 			},
 		},
 	},
+
 	computed: {
+
 		counterShouldBePrimary() {
-			return this.item.unreadMention || (this.item.unreadMessages && this.item.type === CONVERSATION.TYPE.ONE_TO_ONE)
+			return this.item.unreadMention || (this.item.unreadMessages !== 0 && this.item.type === CONVERSATION.TYPE.ONE_TO_ONE)
 		},
 
 		linkToConversation() {
@@ -249,10 +255,22 @@ export default {
 			const lastMessageTimestamp = this.item.lastMessage ? this.item.lastMessage.timestamp : 0
 
 			if (Object.keys(this.messages).length > 0) {
+				// FIXME: risky way to get last message that assumes that keys are always sorted
+				// should use this.$store.getters.messagesList instead ?
 				const messagesKeys = Object.keys(this.messages)
 				const lastMessageId = messagesKeys[messagesKeys.length - 1]
 
-				if (this.messages[lastMessageId].timestamp > lastMessageTimestamp) {
+				/**
+				 * Only use the last message as lastmessage when:
+				 * 1. It's newer than the conversations last message
+				 * 2. It's not a command reply
+				 * 3. It's not a temporary message starting with "/" which is a user posting a command
+				 */
+				if (this.messages[lastMessageId].timestamp > lastMessageTimestamp
+					&& (this.messages[lastMessageId].actorType !== ATTENDEE.ACTOR_TYPE.BOTS
+						|| this.messages[lastMessageId].actorId === ATTENDEE.CHANGELOG_BOT_ID)
+					&& (!lastMessageId.startsWith('temp-')
+						|| !this.messages[lastMessageId].message.startsWith('/'))) {
 					return this.messages[lastMessageId]
 				}
 			}
@@ -296,11 +314,23 @@ export default {
 				author = author.substring(0, spacePosition)
 			}
 
-			if (author.length === 0 && this.lastChatMessage.actorType === 'guests') {
+			if (author.length === 0 && this.lastChatMessage.actorType === ATTENDEE.ACTOR_TYPE.GUESTS) {
 				return t('spreed', 'Guest')
 			}
 
 			return author
+		},
+
+		to() {
+			return !this.isSearchResult ? { name: 'conversation', params: { token: this.item.token } } : ''
+		},
+
+		isActive() {
+			if (!this.isSearchResult) {
+				return this.$store.getters.getToken() === this.to.params.token
+			} else {
+				return false
+			}
 		},
 	},
 	methods: {
@@ -309,8 +339,13 @@ export default {
 				await this.$copyText(this.linkToConversation)
 				showSuccess(t('spreed', 'Conversation link copied to clipboard.'))
 			} catch (error) {
+				console.error('Error copying link: ', error)
 				showError(t('spreed', 'The link could not be copied.'))
 			}
+		},
+
+		markConversationAsRead() {
+			this.$store.dispatch('clearLastReadMessage', { token: this.item.token })
 		},
 
 		/**
@@ -325,17 +360,11 @@ export default {
 						return
 					}
 
-					if (this.item.token === this.$store.getters.getToken()) {
-						this.$router.push({ name: 'root', params: { skipLeaveWarning: true } })
-						this.$store.dispatch('updateToken', '')
-					}
-
 					try {
-						await deleteConversation(this.item.token)
-						// If successful, deletes the conversation from the store
-						this.$store.dispatch('deleteConversation', this.item.token)
+						await this.$store.dispatch('deleteConversationFromServer', { token: this.item.token })
 					} catch (error) {
 						console.debug(`error while deleting conversation ${error}`)
+						showError(t('spreed', 'Error while deleting conversation'))
 					}
 				}.bind(this)
 			)
@@ -346,9 +375,7 @@ export default {
 		 */
 		async leaveConversation() {
 			try {
-				await removeCurrentUserFromConversation(this.item.token)
-				// If successful, deletes the conversation from the store
-				this.$store.dispatch('deleteConversation', this.item.token)
+				await this.$store.dispatch('removeCurrentUserFromConversation', { token: this.item.token })
 			} catch (error) {
 				if (error?.response?.status === 400) {
 					showError(t('spreed', 'You need to promote a new moderator before you can leave the conversation.'))
@@ -366,8 +393,7 @@ export default {
 		 * @param {int} level The notification level to set.
 		 */
 		async setNotificationLevel(level) {
-			await setNotificationLevel(this.item.token, level)
-			this.item.notificationLevel = level
+			await this.$store.dispatch('setNotificationLevel', { token: this.item.token, notificationLevel: level })
 		},
 
 		// forward click event
@@ -379,31 +405,9 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-::v-deep .counter {
-	font-size: 12px;
-	/*
-	 * Always add the bubble
-	 */
-	padding: 4px 6px !important;
-	border-radius: 10px;
-
-	&:not(.app-navigation-entry__counter--highlighted) {
-		background-color: var(--color-background-darker);
-	}
-
-	span {
-		padding: 2px 6px;
-	}
-}
 
 ::v-deep .action-text__title {
 	margin-left: 12px;
-}
-
-.has-unread-messages {
-	::v-deep .acli__content__line-one__title {
-		font-weight: bold;
-	}
 }
 
 .critical {

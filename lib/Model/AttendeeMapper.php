@@ -79,6 +79,30 @@ class AttendeeMapper extends QBMapper {
 
 	/**
 	 * @param int $roomId
+	 * @param string $actorType
+	 * @param int|null $lastJoinedCall
+	 * @return int
+	 */
+	public function getActorsCountByType(int $roomId, string $actorType, ?int $lastJoinedCall = null): int {
+		$query = $this->db->getQueryBuilder();
+		$query->select($query->func()->count('*', 'num_actors'))
+			->from($this->getTableName())
+			->where($query->expr()->eq('room_id', $query->createNamedParameter($roomId, IQueryBuilder::PARAM_INT)))
+			->andWhere($query->expr()->eq('actor_type', $query->createNamedParameter($actorType)));
+
+		if ($lastJoinedCall !== null) {
+			$query->andWhere($query->expr()->gte('last_joined_call', $query->createNamedParameter($lastJoinedCall, IQueryBuilder::PARAM_INT)));
+		}
+
+		$result = $query->execute();
+		$count = (int) $result->fetchOne();
+		$result->closeCursor();
+
+		return $count;
+	}
+
+	/**
+	 * @param int $roomId
 	 * @param int[] $participantType
 	 * @return int
 	 */
@@ -119,6 +143,7 @@ class AttendeeMapper extends QBMapper {
 			'room_id' => $row['room_id'],
 			'actor_type' => $row['actor_type'],
 			'actor_id' => $row['actor_id'],
+			'display_name' => (string) $row['display_name'],
 			'pin' => $row['pin'],
 			'participant_type' => (int) $row['participant_type'],
 			'favorite' => (bool) $row['favorite'],
@@ -127,6 +152,7 @@ class AttendeeMapper extends QBMapper {
 			'last_read_message' => (int) $row['last_read_message'],
 			'last_mention_message' => (int) $row['last_mention_message'],
 			'read_privacy' => (int) $row['read_privacy'],
+			'publishing_permissions' => (int) $row['publishing_permissions'],
 		]);
 	}
 }

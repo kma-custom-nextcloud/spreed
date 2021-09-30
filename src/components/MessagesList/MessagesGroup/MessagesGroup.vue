@@ -41,6 +41,9 @@
 					:key="message.id"
 					v-bind="message"
 					:is-first-message="index === 0"
+					:next-message-id="(messages[index + 1] && messages[index + 1].id) || nextMessageId"
+					:previous-message-id="(index > 0 && messages[index - 1].id) || previousMessageId"
+					:last-read-message-id="lastReadMessageId"
 					:actor-type="actorType"
 					:actor-id="actorId"
 					:actor-display-name="actorDisplayName"
@@ -54,6 +57,7 @@
 <script>
 import AuthorAvatar from './AuthorAvatar'
 import Message from './Message/Message'
+import { ATTENDEE } from '../../../constants'
 
 export default {
 	name: 'MessagesGroup',
@@ -68,6 +72,7 @@ export default {
 		/**
 		 * The message id.
 		 */
+		// FIXME: looks unused
 		id: {
 			type: [String, Number],
 			required: true,
@@ -85,6 +90,22 @@ export default {
 		messages: {
 			type: Array,
 			required: true,
+		},
+
+		previousMessageId: {
+			type: [String, Number],
+			default: 0,
+		},
+
+		nextMessageId: {
+			type: [String, Number],
+			default: 0,
+		},
+
+		// FIXME: read from messagesStore as this is the same value for all
+		lastReadMessageId: {
+			type: [String, Number],
+			default: 0,
 		},
 	},
 
@@ -117,7 +138,7 @@ export default {
 		actorDisplayName() {
 			const displayName = this.messages[0].actorDisplayName.trim()
 
-			if (this.actorType === 'guests') {
+			if (this.actorType === ATTENDEE.ACTOR_TYPE.GUESTS) {
 				return this.$store.getters.getGuestName(this.token, this.actorId)
 			}
 

@@ -48,11 +48,15 @@ const getters = {
 		return state.selectedVideoPeerId
 	},
 	isQualityWarningTooltipDismissed: (state) => state.qualityWarningTooltipDismissed,
-	getParticipantRaisedHand: (state) => (sessionId) => {
-		return state.participantRaisedHands[sessionId] || { state: false, timestamp: null }
-	},
-	isParticipantRaisedHand: (state) => (sessionId) => {
-		return state.participantRaisedHands[sessionId]?.state
+	getParticipantRaisedHand: (state) => (sessionIds) => {
+		for (let i = 0; i < sessionIds.length; i++) {
+			if (state.participantRaisedHands[sessionIds[i]]) {
+				// note: only the raised states are stored, so no need to confirm
+				return state.participantRaisedHands[sessionIds[i]]
+			}
+		}
+
+		return { state: false, timestamp: null }
 	},
 	getCachedBackgroundImageAverageColor: (state) => (videoBackgroundId) => {
 		return state.backgroundImageAverageColorCache[videoBackgroundId]
@@ -119,7 +123,7 @@ const actions = {
 			// BrowserStorage.getItem returns a string instead of a boolean
 			isGrid = (isGrid === 'true')
 		}
-		context.dispatch('setCallViewMode', { isGrid: isGrid, isStripeOpen: true })
+		context.dispatch('setCallViewMode', { isGrid, isStripeOpen: true })
 
 		context.commit('setQualityWarningTooltipDismissed', { qualityWarningTooltipDismissed: false })
 	},

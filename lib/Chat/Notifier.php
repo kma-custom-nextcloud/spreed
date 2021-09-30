@@ -197,7 +197,7 @@ class Notifier {
 	 *
 	 * @param Room $chat
 	 */
-	public function removePendingNotificationsForRoom(Room $chat): void {
+	public function removePendingNotificationsForRoom(Room $chat, bool $chatOnly = false): void {
 		$notification = $this->notificationManager->createNotification();
 		$shouldFlush = $this->notificationManager->defer();
 
@@ -207,11 +207,13 @@ class Notifier {
 		$notification->setObject('chat', $chat->getToken());
 		$this->notificationManager->markProcessed($notification);
 
-		$notification->setObject('room', $chat->getToken());
-		$this->notificationManager->markProcessed($notification);
+		if (!$chatOnly) {
+			$notification->setObject('room', $chat->getToken());
+			$this->notificationManager->markProcessed($notification);
 
-		$notification->setObject('call', $chat->getToken());
-		$this->notificationManager->markProcessed($notification);
+			$notification->setObject('call', $chat->getToken());
+			$this->notificationManager->markProcessed($notification);
+		}
 
 		if ($shouldFlush) {
 			$this->notificationManager->flush();
@@ -325,7 +327,7 @@ class Notifier {
 		}
 
 		try {
-			$participant = $room->getParticipant($userId);
+			$participant = $room->getParticipant($userId, false);
 			$notificationLevel = $participant->getAttendee()->getNotificationLevel();
 			if ($notificationLevel === Participant::NOTIFY_DEFAULT) {
 				if ($room->getType() === Room::ONE_TO_ONE_CALL) {
@@ -341,9 +343,11 @@ class Notifier {
 				// so they can see the room in their room list and
 				// the notification can be parsed and links to an existing room,
 				// where they are a participant of.
+				$user = $this->userManager->get($userId);
 				$this->participantService->addUsers($room, [[
 					'actorType' => Attendee::ACTOR_USERS,
 					'actorId' => $userId,
+					'displayName' => $user ? $user->getDisplayName() : $userId,
 				]]);
 				return true;
 			}

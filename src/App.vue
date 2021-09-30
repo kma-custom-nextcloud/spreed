@@ -31,7 +31,7 @@
 		</AppContent>
 		<RightSidebar
 			:show-chat-in-sidebar="isInCall" />
-		<PreventUnload :when="warnLeaving" />
+		<PreventUnload :when="warnLeaving || isSendingMessages" />
 		<UploadEditor />
 		<SettingsDialog />
 		<ConversationSettingsDialog />
@@ -49,9 +49,7 @@ import RightSidebar from './components/RightSidebar/RightSidebar'
 import { EventBus } from './services/EventBus'
 import BrowserStorage from './services/BrowserStorage'
 import { getCurrentUser } from '@nextcloud/auth'
-import { fetchConversation } from './services/conversationsService'
 import {
-	joinConversation,
 	leaveConversationSync,
 } from './services/participantsService'
 import {
@@ -68,6 +66,8 @@ import UploadEditor from './components/UploadEditor'
 import SettingsDialog from './components/SettingsDialog/SettingsDialog'
 import ConversationSettingsDialog from './components/ConversationSettings/ConversationSettingsDialog'
 import '@nextcloud/dialogs/styles/toast.scss'
+import { register } from 'extendable-media-recorder'
+import { connect } from 'extendable-media-recorder-wav-encoder'
 
 export default {
 	name: 'App',
@@ -109,6 +109,10 @@ export default {
 
 		getUserId() {
 			return this.$store.getters.getUserId()
+		},
+
+		isSendingMessages() {
+			return this.$store.getters.isSendingMessages
 		},
 
 		warnLeaving() {
@@ -203,7 +207,7 @@ export default {
 			// Update current token in the token store
 			this.$store.dispatch('updateToken', this.$route.params.token)
 			// Automatically join the conversation as well
-			joinConversation(this.$route.params.token)
+			this.$store.dispatch('joinConversation', { token: this.$route.params.token })
 		}
 
 		window.addEventListener('resize', this.onResize)
@@ -323,7 +327,7 @@ export default {
 		}
 	},
 
-	mounted() {
+	async mounted() {
 		// see browserCheck mixin
 		this.checkBrowser()
 		// Check sidebar status in previous sessions
@@ -332,6 +336,8 @@ export default {
 		} else if (BrowserStorage.getItem('sidebarOpen') === 'true') {
 			this.$store.dispatch('showSidebar')
 		}
+
+		register(await connect())
 	},
 
 	methods: {
@@ -393,11 +399,14 @@ export default {
 				}
 			}
 
+			let newTitle = this.defaultPageTitle
 			if (title !== '') {
-				window.document.title = (showAsterix ? '* ' : '') + `${title} - ${this.defaultPageTitle}`
-			} else {
-				window.document.title = (showAsterix ? '* ' : '') + this.defaultPageTitle
+				newTitle = `${title} - ${newTitle}`
 			}
+			if (showAsterix && !newTitle.startsWith('* ')) {
+				newTitle = '* ' + newTitle
+			}
+			window.document.title = newTitle
 		},
 
 		onResize() {
@@ -422,14 +431,9 @@ export default {
 
 			try {
 				/**
-				 * Fetches the conversations from the server and then adds them one by one
-				 * to the store.
+				 * Fetches a single conversation
 				 */
-				const response = await fetchConversation(token)
-
-				// this.$store.dispatch('purgeConversationsStore')
-				this.$store.dispatch('addConversation', response.data.ocs.data)
-				this.$store.dispatch('markConversationRead', token)
+				await this.$store.dispatch('fetchConversation', { token })
 
 				/**
 				 * Emits a global event that is used in App.vue to update the page title once the
@@ -458,23 +462,21 @@ export default {
 }
 </script>
 
+<style lang="scss">
+/** override toastify position due to top bar */
+body.has-topbar .toastify-top {
+	margin-top: 105px;
+}
+</style>
+
 <style lang="scss" scoped>
 .content {
 	height: 100%;
 
-	::v-deep .app-content:hover {
-		.action-item--single {
-			background-color: rgba(0, 0, 0, .1) !important;
-
-			&:hover {
-				background-color: rgba(0, 0, 0, .2) !important;
-			}
-		}
-	}
-
+	//FIXME: remove this v-deep once nextcloud vue v4 is adopted
 	::v-deep .app-navigation-toggle {
-		top: 10px;
-		right: -10px;
+		top: 8px;
+		right: -8px;
 		border-radius: var(--border-radius-pill);
 	}
 

@@ -112,10 +112,11 @@
 							class="video"
 							:is-grid="true"
 							:fit-video="isStripe"
+							:token="token"
 							:local-media-model="localMediaModel"
 							:video-container-aspect-ratio="videoContainerAspectRatio"
 							:local-call-participant-model="localCallParticipantModel"
-							@switchScreenToId="1"
+							@switch-screen-to-id="switchScreenToId"
 							@click-video="handleClickLocalVideo" />
 					</div>
 					<button v-if="hasNextPage && gridWidth > 0 && showVideoOverlay"
@@ -135,10 +136,11 @@
 					:fit-video="true"
 					:is-stripe="true"
 					:show-controls="false"
+					:token="token"
 					:local-media-model="localMediaModel"
 					:video-container-aspect-ratio="videoContainerAspectRatio"
 					:local-call-participant-model="localCallParticipantModel"
-					@switchScreenToId="1"
+					@switch-screen-to-id="switchScreenToId"
 					@click-video="handleClickLocalVideo" />
 				<!-- page indicator (disabled) -->
 				<div
@@ -443,7 +445,8 @@ export default {
 
 			return {
 				gridTemplateColumns: `repeat(${columns}, minmax(${this.minWidth}px, 1fr))`,
-				gridTemplateRows: `repeat(${rows}, minmax(${this.minHeight}px, 1fr))` }
+				gridTemplateRows: `repeat(${rows}, minmax(${this.minHeight}px, 1fr))`,
+			}
 		},
 
 		// Check if there's an overflow of videos (videos that don't fit in the grid)
@@ -473,7 +476,7 @@ export default {
 
 	watch: {
 		// If the video array size changes, rebuild the grid
-		'videos.length': function() {
+		'videos.length'() {
 			this.makeGrid()
 		},
 		// TODO: rebuild the grid to have optimal for last page
@@ -545,23 +548,23 @@ export default {
 		placeholderName(i) {
 			switch (i) {
 			case 0:
-				return 'Sandra'
+				return 'Sandra McKinney'
 			case 1:
-				return 'Chris'
+				return 'Chris Wurst'
 			case 2:
-				return 'Edeltraut'
+				return 'Edeltraut Bobb'
 			case 3:
-				return 'Arthur'
+				return 'Arthur Blitz'
 			case 4:
-				return 'Roeland'
+				return 'Roeland Douma'
 			case 5:
-				return 'Vanessa'
+				return 'Vanessa Steg'
 			case 6:
-				return 'Emily'
+				return 'Emily Grant'
 			case 7:
-				return 'Tobias'
+				return 'Tobias Kaminsky'
 			case 8:
-				return 'Vincent'
+				return 'Adrian Ada'
 			}
 		},
 
@@ -769,6 +772,10 @@ export default {
 
 		handleClickLocalVideo() {
 			this.$emit('click-local-video')
+		},
+
+		switchScreenToId(id) {
+			this.$emit('switch-screen-to-id', id)
 		},
 
 		isSelected(callParticipantModel) {

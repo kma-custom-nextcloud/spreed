@@ -5,7 +5,7 @@
 			<TopBar
 				:is-in-call="showChatInSidebar" />
 			<transition name="fade">
-				<ChatView v-if="!showChatInSidebar" :token="token" />
+				<ChatView v-if="!showChatInSidebar" />
 				<template v-else>
 					<CallView
 						:token="token" />
@@ -20,7 +20,6 @@ import CallView from '../components/CallView/CallView'
 import ChatView from '../components/ChatView'
 import LobbyScreen from '../components/LobbyScreen'
 import TopBar from '../components/TopBar/TopBar'
-import { PARTICIPANT } from '../constants'
 import isInLobby from '../mixins/isInLobby'
 import isInCall from '../mixins/isInCall'
 import participant from '../mixins/participant'
@@ -58,9 +57,9 @@ export default {
 	},
 
 	watch: {
-		isInLobby: function(isInLobby) {
+		isInLobby(isInLobby) {
 			// User is now blocked by the lobby
-			if (isInLobby && this.participant.inCall !== PARTICIPANT.CALL_FLAG.DISCONNECTED) {
+			if (isInLobby && this.isInCall) {
 				this.$store.dispatch('leaveCall', {
 					token: this.token,
 					participantIdentifier: this.$store.getters.getParticipantIdentifier(),

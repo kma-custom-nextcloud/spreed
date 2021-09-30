@@ -22,6 +22,7 @@
 
 import axios from '@nextcloud/axios'
 import { generateOcsUrl } from '@nextcloud/router'
+import BrowserStorage from './BrowserStorage'
 
 /**
  * Sets the attachment folder setting for the user
@@ -30,7 +31,7 @@ import { generateOcsUrl } from '@nextcloud/router'
  * @returns {Object} The axios response
  */
 const setAttachmentFolder = async function(path) {
-	return axios.post(generateOcsUrl('apps/spreed/api/v1/settings', 2) + 'user', {
+	return axios.post(generateOcsUrl('apps/spreed/api/v1/settings/user'), {
 		key: 'attachment_folder',
 		value: path,
 	})
@@ -43,7 +44,7 @@ const setAttachmentFolder = async function(path) {
  * @returns {Object} The axios response
  */
 const setReadStatusPrivacy = async function(privacy) {
-	return axios.post(generateOcsUrl('apps/spreed/api/v1/settings', 2) + 'user', {
+	return axios.post(generateOcsUrl('apps/spreed/api/v1/settings/user'), {
 		key: 'read_status_privacy',
 		value: privacy,
 	})
@@ -58,15 +59,28 @@ const setReadStatusPrivacy = async function(privacy) {
  * @returns {Object} The axios response
  */
 const setSIPSettings = async function(sipGroups, sharedSecret, dialInInfo) {
-	return axios.post(generateOcsUrl('apps/spreed/api/v1/settings', 2) + 'sip', {
+	return axios.post(generateOcsUrl('apps/spreed/api/v1/settings/sip'), {
 		sipGroups,
 		sharedSecret,
 		dialInInfo,
 	})
 }
 
+const setPlaySounds = async function(isGuest, enabled) {
+	const savableValue = enabled ? 'yes' : 'no'
+	if (!isGuest) {
+		return axios.post(generateOcsUrl('apps/spreed/api/v1/settings/user'), {
+			key: 'play_sounds',
+			value: savableValue,
+		})
+	} else {
+		BrowserStorage.setItem('play_sounds', savableValue)
+	}
+}
+
 export {
 	setAttachmentFolder,
 	setReadStatusPrivacy,
 	setSIPSettings,
+	setPlaySounds,
 }

@@ -40,12 +40,14 @@ get the messagesList array and loop through the list to generate the messages.
 				class="icon-loading" />
 		</div>
 		<MessagesGroup
-			v-for="item of messagesGroupedByAuthor"
+			v-for="(item, index) of messagesGroupedByAuthor"
 			:key="item[0].id"
 			:style="{ height: item.height + 'px' }"
 			v-bind="item"
+			:last-read-message-id="visualLastReadMessageId"
 			:messages="item"
-			@deleteMessage="handleDeleteMessage" />
+			:next-message-id="(messagesGroupedByAuthor[index + 1] && messagesGroupedByAuthor[index + 1][0].id) || 0"
+			:previous-message-id="(index > 0 && messagesGroupedByAuthor[index - 1][messagesGroupedByAuthor[index - 1].length - 1].id) || 0" />
 		<template v-if="!messagesGroupedByAuthor.length">
 			<LoadingPlaceholder
 				type="messages"
@@ -68,15 +70,15 @@ get the messagesList array and loop through the list to generate the messages.
 <script>
 import moment from '@nextcloud/moment'
 import MessagesGroup from './MessagesGroup/MessagesGroup'
-import { fetchMessages, lookForNewMessages } from '../../services/messagesService'
-import CancelableRequest from '../../utils/cancelableRequest'
 import Axios from '@nextcloud/axios'
 import { subscribe, unsubscribe } from '@nextcloud/event-bus'
 import isInLobby from '../../mixins/isInLobby'
+import { ATTENDEE } from '../../constants'
 import debounce from 'debounce'
 import { EventBus } from '../../services/EventBus'
 import LoadingPlaceholder from '../LoadingPlaceholder'
 import ChevronDown from 'vue-material-design-icons/ChevronDown'
+import uniqueId from 'lodash/uniqueId'
 
 export default {
 	name: 'MessagesList',
@@ -103,22 +105,17 @@ export default {
 			type: Boolean,
 			required: true,
 		},
+
+		isVisible: {
+			type: Boolean,
+			default: true,
+		},
 	},
 
-	data: function() {
+	data() {
 		return {
-			/**
-			 * Stores the cancel function returned by `cancelableLookForNewMessages`,
-			 * which allows to cancel the previous long polling request for new
-			 * messages before making another one.
-			 */
-			cancelLookForNewMessages: () => {},
-			/**
-			 * Stores the cancel function returned by `cancelableFetchMessages`,
-			 * which allows to cancel the previous request for old messages
-			 * when quickly switching to a new conversation.
-			 */
-			cancelFetchMessages: () => {},
+			viewId: null,
+
 			/**
 			 * When scrolling to the top of the div .scroller we start loading previous
 			 * messages. This boolean allows us to show/hide the loader.
@@ -132,11 +129,21 @@ export default {
 
 			pollingErrorTimeout: 1,
 
-			oldMessagesPromise: null,
+			loadingOldMessages: false,
+
+			destroying: false,
 		}
 	},
 
 	computed: {
+		isWindowVisible() {
+			return this.$store.getters.windowIsVisible() && this.isVisible
+		},
+
+		visualLastReadMessageId() {
+			return this.$store.getters.getVisualLastReadMessageId(this.token)
+		},
+
 		/**
 		 * Gets the messages array. We need this because the DynamicScroller needs an array to
 		 * loop through.
@@ -154,6 +161,7 @@ export default {
 		 * @returns {object}
 		 */
 		messages() {
+			// FIXME: remove if unused ?
 			return this.$store.getters.messages(this.token)
 		},
 		/**
@@ -216,7 +224,7 @@ export default {
 		},
 
 		chatIdentifier() {
-			return this.token + ':' + this.isParticipant + ':' + this.isInLobby
+			return this.token + ':' + this.isParticipant + ':' + this.isInLobby + ':' + this.viewId
 		},
 
 		scrollToBottomAriaLabel() {
@@ -229,14 +237,27 @@ export default {
 	},
 
 	watch: {
+		isWindowVisible(visible) {
+			if (visible) {
+				this.onWindowFocus()
+				// FIXME: the sidebar chat takes much longer to open, this is why we need a higher value here
+				// need to investigate why the sidebar takes that long to open and is not even animated
+				window.setTimeout(() => this.scrollToFocussedMessage(), 100)
+			}
+		},
 		chatIdentifier: {
 			immediate: true,
-			handler() {
+			handler(newValue, oldValue) {
+				if (oldValue) {
+					this.$store.dispatch('cancelLookForNewMessages', { requestId: oldValue })
+				}
 				this.handleStartGettingMessagesPreconditions()
 			},
 		},
 	},
+
 	mounted() {
+		this.viewId = uniqueId('messagesList')
 		this.scrollToBottom()
 		EventBus.$on('scrollChatToBottom', this.handleScrollChatToBottomEvent)
 		EventBus.$on('smoothScrollChatToBottom', this.smoothScrollToBottom)
@@ -244,17 +265,18 @@ export default {
 		EventBus.$on('routeChange', this.onRouteChange)
 		subscribe('networkOffline', this.handleNetworkOffline)
 		subscribe('networkOnline', this.handleNetworkOnline)
+		window.addEventListener('focus', this.onWindowFocus)
 	},
+
 	beforeDestroy() {
+		window.removeEventListener('focus', this.onWindowFocus)
 		EventBus.$off('scrollChatToBottom', this.handleScrollChatToBottomEvent)
 		EventBus.$off('smoothScrollChatToBottom', this.smoothScrollToBottom)
 		EventBus.$off('focusMessage', this.focusMessage)
 		EventBus.$off('routeChange', this.onRouteChange)
 
-		this.cancelLookForNewMessages()
-		// Prevent further lookForNewMessages requests after the component was
-		// destroyed.
-		this.cancelLookForNewMessages = null
+		this.$store.dispatch('cancelLookForNewMessages', { requestId: this.chatIdentifier })
+		this.destroying = true
 
 		unsubscribe('networkOffline', this.handleNetworkOffline)
 		unsubscribe('networkOnline', this.handleNetworkOnline)
@@ -279,14 +301,30 @@ export default {
 		 * @returns {boolean} Boolean if the messages should be grouped or not
 		 */
 		messagesShouldBeGrouped(message1, message2) {
-			return message2 // Is there a previous message
-				&& (
-					message1.actorType !== 'bots' // Don't group messages of commands and bots
-					|| message1.actorId === 'changelog') // Apart from the changelog bot
-				&& (message1.systemMessage.length === 0) === (message2.systemMessage.length === 0) // Only group system messages with each others
-				&& message1.actorType === message2.actorType // To have the same author, the type
-				&& message1.actorId === message2.actorId // and the id of the author must be the same
-				&& !this.messagesHaveDifferentDate(message1, message2) // Posted on the same day
+			if (!message2) {
+				return false // No previous message
+			}
+
+			if (message1.actorType === ATTENDEE.ACTOR_TYPE_BOTS // Don't group messages of commands and bots
+				&& message1.actorId !== ATTENDEE.CHANGELOG_BOT_ID) { // Apart from the changelog bot
+				return false
+			}
+
+			const message1IsSystem = message1.systemMessage.length !== 0
+			const message2IsSystem = message2.systemMessage.length !== 0
+
+			if (message1IsSystem !== message2IsSystem) {
+				// Only group system messages with each others
+				return false
+			}
+
+			if (!message1IsSystem // System messages are grouped independent from author
+				&& (message1.actorType !== message2.actorType // Otherwise the type and id need to match
+					|| message1.actorId !== message2.actorId)) {
+				return false
+			}
+
+			return !this.messagesHaveDifferentDate(message1, message2) // Posted on the same day
 		},
 
 		/**
@@ -355,9 +393,49 @@ export default {
 			return moment.unix(message.timestamp)
 		},
 
-		handleStartGettingMessagesPreconditions() {
+		scrollToFocussedMessage() {
+			let focussed = null
+			if (this.$route?.hash?.startsWith('#message_')) {
+				// scroll to message in URL anchor
+				focussed = this.focusMessage(this.$route.hash.substr(9), false)
+			}
+
+			if (!focussed && this.visualLastReadMessageId) {
+				// scroll to last read message if visible in the current pages
+				focussed = this.focusMessage(this.visualLastReadMessageId, false, false)
+			}
+
+			// TODO: in case the element is not in a page but does exist in the DB,
+			// we need to scroll up / down to the page where it would exist after
+			// loading said pages
+
+			if (!focussed) {
+				// if no anchor was present or the message to focus on did not exist,
+				// scroll to bottom
+				this.scrollToBottom()
+			}
+
+			// if no scrollbars, clear read marker directly as scrolling is not possible for the user to clear it
+			// also clear in case lastReadMessage is zero which is due to an older bug
+			if (this.visualLastReadMessageId === 0 || this.scroller.scrollHeight <= this.scroller.offsetHeight) {
+				// clear after a delay, unless scrolling can resume in-between
+				this.debounceUpdateReadMarkerPosition()
+			}
+		},
+
+		async handleStartGettingMessagesPreconditions() {
 			if (this.token && this.isParticipant && !this.isInLobby) {
+
+				// prevent sticky mode before we have loaded anything
+				this.setChatScrolledToBottom(false)
+
+				this.$store.dispatch('setVisualLastReadMessageId', {
+					token: this.token,
+					id: this.conversation.lastReadMessage,
+				})
+
 				if (this.$store.getters.getFirstKnownMessageId(this.token) === null) {
+					// first time load, initialize important properties
 					this.$store.dispatch('setFirstKnownMessageId', {
 						token: this.token,
 						id: this.conversation.lastReadMessage,
@@ -367,47 +445,51 @@ export default {
 						id: this.conversation.lastReadMessage,
 					})
 
-					this.getMessages(true)
-				} else {
-					this.getMessages(false)
+					// get history before last read message
+					await this.getOldMessages(true)
+					// at this stage, the read marker will appear at the bottom of the view port since
+					// we haven't fetched the messages that come after it yet
+					// TODO: should we still show a spinner at this stage ?
 				}
-			} else if (this.cancelLookForNewMessages) {
-				this.cancelLookForNewMessages()
+
+				let hasScrolled = false
+				// if lookForNewMessages will long poll instead of returning existing messages,
+				// scroll right away to avoid delays
+				if (!this.$store.getters.hasMoreMessagesToLoad(this.token)) {
+					hasScrolled = true
+					await this.$nextTick(() => {
+						this.scrollToFocussedMessage()
+					})
+				}
+
+				// get new messages
+				await this.lookForNewMessages()
+
+				// don't scroll if lookForNewMessages was polling as we don't want
+				// to scroll back to the read marker after receiving new messages later
+				if (!hasScrolled) {
+					this.scrollToFocussedMessage()
+				}
+			} else {
+				this.$store.dispatch('cancelLookForNewMessages', { requestId: this.chatIdentifier })
 			}
 		},
 
 		/**
 		 * Fetches the messages of a conversation given the conversation token. Triggers
 		 * a long-polling request for new messages.
-		 * @param {boolean} loadOldMessages In case it is the first visit of this conversation, we need to load the history
 		 */
-		async getMessages(loadOldMessages) {
-			let focussed = false
-			if (loadOldMessages) {
-				// Gets the history of the conversation.
-				await this.getOldMessages(true)
-
-				if (this.$route?.hash?.startsWith('#message_')) {
-					// scroll to message in URL anchor
-					focussed = this.focusMessage(this.$route.hash.substr(9), false)
-				}
-			}
-
-			if (!focussed) {
-				// if no anchor was present or the message to focus on did not exist,
-				// simply scroll to bottom
-				this.scrollToBottom()
-			}
-
+		async lookForNewMessages() {
 			// Once the history is received, starts looking for new messages.
-			this.$nextTick(() => {
-				if (this._isBeingDestroyed || this._isDestroyed) {
-					console.debug('Prevent getting new messages on a destroyed MessagesList')
-					return
-				}
+			if (this._isBeingDestroyed || this._isDestroyed) {
+				console.debug('Prevent getting new messages on a destroyed MessagesList')
+				return
+			}
 
-				this.getNewMessages()
-			})
+			const followInNewMessages = this.conversation.lastMessage
+				&& this.conversation.lastReadMessage === this.conversation.lastMessage.id
+
+			await this.getNewMessages(followInNewMessages)
 		},
 
 		/**
@@ -415,97 +497,45 @@ export default {
 		 * @param {boolean} includeLastKnown Include or exclude the last known message in the response
 		 */
 		async getOldMessages(includeLastKnown) {
-			/**
-			 * Clear previous requests if there's one pending
-			 */
-			this.cancelFetchMessages('canceled')
-
-			// Get a new cancelable request function and cancel function pair
-			const { request, cancel } = CancelableRequest(fetchMessages)
-			// Assign the new cancel function to our data value
-			this.cancelFetchMessages = cancel
-
-			const token = this.token
-			const lastKnownMessageId = this.$store.getters.getFirstKnownMessageId(token)
-			let newestKnownMessageId = 0
-
 			// Make the request
 			try {
-				this.oldMessagesPromise = request({ token, lastKnownMessageId, includeLastKnown: includeLastKnown ? '1' : '0' })
-				const messages = await this.oldMessagesPromise
-				// Process each messages and adds it to the store
-				messages.data.ocs.data.forEach(message => {
-					if (message.actorType === 'guests') {
-						this.$store.dispatch('setGuestNameIfEmpty', message)
-					}
-					this.$store.dispatch('processMessage', message)
-					newestKnownMessageId = Math.max(newestKnownMessageId, message.id)
+				this.loadingOldMessages = true
+				await this.$store.dispatch('fetchMessages', {
+					token: this.token,
+					lastKnownMessageId: this.$store.getters.getFirstKnownMessageId(this.token),
+					includeLastKnown,
 				})
 
-				if (messages.headers['x-chat-last-given']) {
-					this.$store.dispatch('setFirstKnownMessageId', {
-						token: token,
-						id: parseInt(messages.headers['x-chat-last-given'], 10),
-					})
-				}
-
-				// For guests we also need to set the last known message id
-				// after the first grab of the history, otherwise they start loading
-				// the full history with getNewMessages().
-				if (includeLastKnown && newestKnownMessageId
-					&& !this.$store.getters.getLastKnownMessageId(token)) {
-					this.$store.dispatch('setLastKnownMessageId', {
-						token: token,
-						id: newestKnownMessageId,
-					})
-				}
-				this.oldMessagesPromise = null
+				this.loadingOldMessages = false
 			} catch (exception) {
 				if (Axios.isCancel(exception)) {
 					console.debug('The request has been canceled', exception)
 				}
-				this.oldMessagesPromise = null
+				this.loadingOldMessages = false
 			}
 		},
 
 		/**
 		 * Creates a long polling request for a new message.
+		 * @param {boolean} scrollToBottom Whether we should try to automatically scroll to the bottom
 		 */
-		async getNewMessages() {
-			if (!this.cancelLookForNewMessages) {
+		async getNewMessages(scrollToBottom = true) {
+			if (this.destroying) {
 				return
 			}
 
-			// Clear previous requests if there's one pending
-			this.cancelLookForNewMessages('canceled')
-			// Get a new cancelable request function and cancel function pair
-			const { request, cancel } = CancelableRequest(lookForNewMessages)
-			// Assign the new cancel function to our data value
-			this.cancelLookForNewMessages = cancel
-			// Get the last message's id
-			const token = this.token
-			const lastKnownMessageId = this.$store.getters.getLastKnownMessageId(token)
-
 			// Make the request
 			try {
-				const messages = await request({ token, lastKnownMessageId })
+				// TODO: move polling logic to the store and also cancel timers on cancel
 				this.pollingErrorTimeout = 1
-
-				// Process each messages and adds it to the store
-				messages.data.ocs.data.forEach(message => {
-					if (message.actorType === 'guests') {
-						this.$store.dispatch('forceGuestName', message)
-					}
-					this.$store.dispatch('processMessage', message)
-				})
-
-				this.$store.dispatch('setLastKnownMessageId', {
-					token: token,
-					id: parseInt(messages.headers['x-chat-last-given'], 10),
+				await this.$store.dispatch('lookForNewMessages', {
+					token: this.token,
+					lastKnownMessageId: this.$store.getters.getLastKnownMessageId(this.token),
+					requestId: this.chatIdentifier,
 				})
 
 				// Scroll to the last message if sticky
-				if (this.isSticky) {
+				if (scrollToBottom && this.isSticky) {
 					this.smoothScrollToBottom()
 				}
 			} catch (exception) {
@@ -542,14 +572,6 @@ export default {
 			}, 500)
 		},
 
-		/**
-		 * Dispatches the deleteMessages action.
-		 * @param {object} event The deleteMessage event emitted by the Message component.
-		 */
-		handleDeleteMessage(event) {
-			this.$store.dispatch('deleteMessage', event.message)
-		},
-
 		debounceHandleScroll: debounce(function() {
 			this.handleScroll()
 		}, 50),
@@ -568,7 +590,7 @@ export default {
 				this.displayMessagesLoader = false
 				this.previousScrollTopValue = scrollTop
 			} else if (scrollHeight > elementHeight && scrollTop < 800 && scrollTop <= this.previousScrollTopValue) {
-				if (this.oldMessagesPromise) {
+				if (this.loadingOldMessages) {
 					// already loading, don't do it twice
 					return
 				}
@@ -583,6 +605,133 @@ export default {
 				this.displayMessagesLoader = false
 				this.previousScrollTopValue = scrollTop
 			}
+
+			this.debounceUpdateReadMarkerPosition()
+		},
+
+		/**
+		 * Finds the last message that is fully visible in the scroller viewport
+		 *
+		 * Starts searching forward after the given message element until we reach
+		 * the bottom of the viewport.
+		 *
+		 * @param {object} messageEl message element after which to start searching
+		 * @returns {object} DOM element for the last visible message
+		 */
+		findFirstVisibleMessage(messageEl) {
+			let el = messageEl
+			let previousEl = el
+			const scrollTop = this.scroller.scrollTop
+			while (el) {
+				// is the message element fully visible with no intersection with the bottom border ?
+				if (el.offsetTop - scrollTop >= 0) {
+					// this means that the previous message we had was fully visible,
+					// so we return that
+					return previousEl
+				}
+
+				previousEl = el
+				el = document.getElementById('message_' + el.getAttribute('data-next-message-id'))
+			}
+
+			return previousEl
+		},
+
+		/**
+		 * Sync the visual marker position with what is currently in the store.
+		 * This separation exists to avoid jumpy marker while scrolling.
+		 *
+		 * Also see updateReadMarkerPosition() for the backend update.
+		 */
+		refreshReadMarkerPosition() {
+			if (!this.conversation) {
+				return
+			}
+			console.debug('setVisualLastReadMessageId token=' + this.token + ' id=' + this.conversation.lastReadMessage)
+			this.$store.dispatch('setVisualLastReadMessageId', {
+				token: this.token,
+				id: this.conversation.lastReadMessage,
+			})
+		},
+
+		debounceUpdateReadMarkerPosition: debounce(function() {
+			this.updateReadMarkerPosition()
+		}, 1000),
+
+		/**
+		 * Finds the first visual unread message element
+		 *
+		 * @returns {object} DOM element of the first unread message
+		 */
+		getUnreadMessageElement() {
+			let el = document.getElementById('message_' + this.visualLastReadMessageId)
+			if (el) {
+				el = el.closest('.message')
+			}
+
+			return el
+		},
+
+		/**
+		 * Recalculates the current read marker position based on the first visible element,
+		 * but only do so if the previous marker was already seen.
+		 *
+		 * The new marker position will be sent to the backend but not applied visually.
+		 * Visually, the marker will only move the next time the user is focussing back to this
+		 * conversation in refreshReadMarkerPosition()
+		 */
+		updateReadMarkerPosition() {
+			if (!this.conversation) {
+				return
+			}
+
+			// to fix issues, this scenario should not happen
+			if (this.conversation.lastReadMessage === 0) {
+				console.debug('clearLastReadMessage because lastReadMessage was 0 token=' + this.token)
+				this.$store.dispatch('clearLastReadMessage', { token: this.token, updateVisually: true })
+				return
+			}
+
+			if (this.conversation.lastReadMessage === this.conversation.lastMessage?.id) {
+				// already at bottom, nothing to do
+				return
+			}
+
+			const unreadMessageElement = this.getUnreadMessageElement()
+
+			// first unread message has not been seen yet, so don't move it
+			if (!unreadMessageElement || unreadMessageElement.getAttribute('data-seen') !== 'true') {
+				return
+			}
+
+			// if we're at bottom of the chat with no more new messages to load, then simply clear the marker
+			if (this.isSticky && !this.$store.getters.hasMoreMessagesToLoad(this.token)) {
+				console.debug('clearLastReadMessage because of isSticky token=' + this.token)
+				this.$store.dispatch('clearLastReadMessage', { token: this.token })
+				return
+			}
+
+			if (unreadMessageElement.offsetTop - this.scroller.scrollTop > 0) {
+				// still visible, hasn't disappeared at the top yet
+				return
+			}
+
+			const firstVisibleMessage = this.findFirstVisibleMessage(unreadMessageElement)
+			if (!firstVisibleMessage) {
+				console.warn('First visible message not found: ', firstVisibleMessage)
+				return
+			}
+
+			const messageId = parseInt(firstVisibleMessage.getAttribute('data-message-id'), 10)
+			if (messageId <= this.conversation.lastReadMessage) {
+				// it was probably a scroll up, don't update
+				return
+			}
+
+			// we don't update visually here, it will update the next time the
+			// user focusses back on the conversation. See refreshReadMarkerPosition().
+			console.debug('updateLastReadMessage token=' + this.token + ' messageId=' + messageId)
+			this.$store.dispatch('updateLastReadMessage', { token: this.token, id: messageId, updateVisually: false })
 		},
 
 		/**
@@ -601,7 +750,7 @@ export default {
 		 */
 		smoothScrollToBottom() {
 			this.$nextTick(function() {
-				if (this.$store.getters.windowIsVisible()) {
+				if (this.isWindowVisible && document.hasFocus()) {
 					// scrollTo is used when the user is watching
 					this.scroller.scrollTo({
 						top: this.scroller.scrollHeight,
@@ -637,9 +786,10 @@ export default {
 		 *
 		 * @param {string} messageId message id
 		 * @param {boolean} smooth true to smooth scroll, false to jump directly
+		 * @param {boolean} highlightAnimation true to highlight and set focus to the message
 		 * @returns {bool} true if element was found, false otherwise
 		 */
-		focusMessage(messageId, smooth = true) {
+		focusMessage(messageId, smooth = true, highlightAnimation = true) {
 			const element = document.getElementById(`message_${messageId}`)
 			if (!element) {
 				// TODO: in some cases might need to trigger a scroll up if this is an older message
@@ -648,13 +798,20 @@ export default {
 			}
 
 			this.$nextTick(async() => {
+				// FIXME: this doesn't wait for the smooth scroll to end
 				await element.scrollIntoView({
 					behavior: smooth ? 'smooth' : 'auto',
 					block: 'center',
 					inline: 'nearest',
 				})
-				element.focus()
-				element.highlightAnimation()
+				if (!smooth) {
+					// scroll the viewport slightly further to make sure the element is about 1/3 from the top
+					this.scroller.scrollTop += this.scroller.offsetHeight / 4
+				}
+				if (highlightAnimation) {
+					element.focus()
+					element.highlightAnimation()
+				}
 			})
 
 			return true
@@ -686,7 +843,7 @@ export default {
 		handleNetworkOffline() {
 			console.debug('Canceling message request as we are offline')
 			if (this.cancelLookForNewMessages) {
-				this.cancelLookForNewMessages()
+				this.$store.dispatch('cancelLookForNewMessages', { requestId: this.chatIdentifier })
 			}
 		},
 
@@ -716,6 +873,15 @@ export default {
 
 		setChatScrolledToBottom(boolean) {
 			this.$emit('setChatScrolledToBottom', boolean)
+			if (boolean) {
+				// mark as read if marker was seen
+				// we have to do this early because unfocussing the window will remove the stickiness
+				this.debounceUpdateReadMarkerPosition()
+			}
+		},
+
+		onWindowFocus() {
+			this.refreshReadMarkerPosition()
 		},
 	},
 }

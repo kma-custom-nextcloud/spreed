@@ -21,7 +21,9 @@
 
 <template>
 	<AppNavigation :aria-label="t('spreed', 'Conversation list')">
-		<div class="new-conversation">
+		<div
+			class="new-conversation"
+			:class="{ 'new-conversation--scrolled-down': !isScrolledToTop }">
 			<SearchBox
 				v-model="searchText"
 				class="conversations-search"
@@ -33,70 +35,75 @@
 				v-if="canStartConversations" />
 		</div>
 		<template #list class="left-sidebar__list">
-			<Caption v-if="isSearching"
-				:title="t('spreed', 'Conversations')" />
-			<li role="presentation">
-				<ConversationsList
-					ref="conversationsList"
-					:conversations-list="conversationsList"
-					:initialised-conversations="initialisedConversations"
-					:search-text="searchText"
-					@click-search-result="handleClickSearchResult"
-					@focus="setFocusedIndex" />
-			</li>
-			<template v-if="isSearching">
-				<template v-if="!listedConversationsLoading && searchResultsListedConversations.length > 0">
-					<Caption
-						:title="t('spreed', 'Open conversations')" />
-					<Conversation
-						v-for="item of searchResultsListedConversations"
-						:key="item.id"
-						:item="item"
-						:is-search-result="true"
-						@click="joinListedConversation(item)" />
+			<div
+				ref="scroller"
+				class="left-sidebar__list"
+				@scroll="debounceHandleScroll">
+				<AppNavigationCaption v-if="isSearching"
+					:title="t('spreed', 'Conversations')" />
+				<li role="presentation">
+					<ConversationsList
+						ref="conversationsList"
+						:conversations-list="conversationsList"
+						:initialised-conversations="initialisedConversations"
+						:search-text="searchText"
+						@click-search-result="handleClickSearchResult"
+						@focus="setFocusedIndex" />
+				</li>
+				<template v-if="isSearching">
+					<template v-if="!listedConversationsLoading && searchResultsListedConversations.length > 0">
+						<AppNavigationCaption
+							:title="t('spreed', 'Open conversations')" />
+						<Conversation
+							v-for="item of searchResultsListedConversations"
+							:key="item.id"
+							:item="item"
+							:is-search-result="true"
+							@click="joinListedConversation(item)" />
+					</template>
+					<template v-if="searchResultsUsers.length !== 0">
+						<AppNavigationCaption
+							:title="t('spreed', 'Users')" />
+						<li v-if="searchResultsUsers.length !== 0" role="presentation">
+							<ConversationsOptionsList
+								:items="searchResultsUsers"
+								@click="createAndJoinConversation" />
+						</li>
+					</template>
+					<template v-if="!showStartConversationsOptions">
+						<AppNavigationCaption v-if="searchResultsUsers.length === 0"
+							:title="t('spreed', 'Users')" />
+						<Hint v-if="contactsLoading" :hint="t('spreed', 'Loading')" />
+						<Hint v-else :hint="t('spreed', 'No search results')" />
+					</template>
 				</template>
-				<template v-if="searchResultsUsers.length !== 0">
-					<Caption
-						:title="t('spreed', 'Users')" />
-					<li v-if="searchResultsUsers.length !== 0" role="presentation">
-						<ConversationsOptionsList
-							:items="searchResultsUsers"
-							@click="createAndJoinConversation" />
-					</li>
-				</template>
-				<template v-if="!showStartConversationsOptions">
-					<Caption v-if="searchResultsUsers.length === 0"
-						:title="t('spreed', 'Users')" />
+				<template v-if="showStartConversationsOptions">
+					<template v-if="searchResultsGroups.length !== 0">
+						<AppNavigationCaption
+							:title="t('spreed', 'Groups')" />
+						<li v-if="searchResultsGroups.length !== 0" role="presentation">
+							<ConversationsOptionsList
+								:items="searchResultsGroups"
+								@click="createAndJoinConversation" />
+						</li>
+					</template>
+
+					<template v-if="searchResultsCircles.length !== 0">
+						<AppNavigationCaption
+							:title="t('spreed', 'Circles')" />
+						<li v-if="searchResultsCircles.length !== 0" role="presentation">
+							<ConversationsOptionsList
+								:items="searchResultsCircles"
+								@click="createAndJoinConversation" />
+						</li>
+					</template>
+
+					<AppNavigationCaption v-if="sourcesWithoutResults"
+						:title="sourcesWithoutResultsList" />
 					<Hint v-if="contactsLoading" :hint="t('spreed', 'Loading')" />
 					<Hint v-else :hint="t('spreed', 'No search results')" />
 				</template>
-			</template>
-			<template v-if="showStartConversationsOptions">
-				<template v-if="searchResultsGroups.length !== 0">
-					<Caption
-						:title="t('spreed', 'Groups')" />
-					<li v-if="searchResultsGroups.length !== 0" role="presentation">
-						<ConversationsOptionsList
-							:items="searchResultsGroups"
-							@click="createAndJoinConversation" />
-					</li>
-				</template>
-
-				<template v-if="searchResultsCircles.length !== 0">
-					<Caption
-						:title="t('spreed', 'Circles')" />
-					<li v-if="searchResultsCircles.length !== 0" role="presentation">
-						<ConversationsOptionsList
-							:items="searchResultsCircles"
-							@click="createAndJoinConversation" />
-					</li>
-				</template>
-
-				<Caption v-if="sourcesWithoutResults"
-					:title="sourcesWithoutResultsList" />
-				<Hint v-if="contactsLoading" :hint="t('spreed', 'Loading')" />
-				<Hint v-else :hint="t('spreed', 'No search results')" />
-			</template>
+			</div>
 		</template>
 
 		<template #footer>
@@ -114,7 +121,7 @@
 <script>
 import CancelableRequest from '../../utils/cancelableRequest'
 import AppNavigation from '@nextcloud/vue/dist/Components/AppNavigation'
-import Caption from '../Caption'
+import AppNavigationCaption from '@nextcloud/vue/dist/Components/AppNavigationCaption'
 import ConversationsList from './ConversationsList/ConversationsList'
 import Conversation from './ConversationsList/Conversation'
 import ConversationsOptionsList from '../ConversationsOptionsList'
@@ -123,8 +130,6 @@ import SearchBox from './SearchBox/SearchBox'
 import debounce from 'debounce'
 import { EventBus } from '../../services/EventBus'
 import {
-	createOneToOneConversation,
-	fetchConversations,
 	searchPossibleConversations,
 	searchListedConversations,
 } from '../../services/conversationsService'
@@ -141,7 +146,7 @@ export default {
 
 	components: {
 		AppNavigation,
-		Caption,
+		AppNavigationCaption,
 		ConversationsList,
 		ConversationsOptionsList,
 		Hint,
@@ -169,6 +174,9 @@ export default {
 			initialisedConversations: false,
 			cancelSearchPossibleConversations: () => {},
 			cancelSearchListedConversations: () => {},
+			// Keeps track of whether the conversation list is scrolled to the top or not
+			isScrolledToTop: true,
+			refreshTimer: null,
 		}
 	},
 
@@ -181,6 +189,8 @@ export default {
 				conversations = conversations.filter(conversation => conversation.displayName.toLowerCase().indexOf(lowerSearchText) !== -1 || conversation.name.toLowerCase().indexOf(lowerSearchText) !== -1)
 			}
 
+			// FIXME: this modifies the original array,
+			// maybe should act on a copy or sort already within the store ?
 			return conversations.sort(this.sortConversations)
 		},
 
@@ -243,7 +253,7 @@ export default {
 
 	mounted() {
 		/** Refreshes the conversations every 30 seconds */
-		window.setInterval(() => {
+		this.refreshTimer = window.setInterval(() => {
 			if (!this.isFetchingConversations) {
 				this.fetchConversations()
 			}
@@ -262,6 +272,11 @@ export default {
 
 		this.cancelSearchListedConversations()
 		this.cancelSearchListedConversations = null
+
+		if (this.refreshTimer) {
+			clearInterval(this.refreshTimer)
+			this.refreshTimer = null
+		}
 	},
 
 	methods: {
@@ -285,6 +300,7 @@ export default {
 			this.contactsLoading = true
 
 			try {
+				// FIXME: move to conversationsStore
 				this.cancelSearchPossibleConversations('canceled')
 				const { request, cancel } = CancelableRequest(searchPossibleConversations)
 				this.cancelSearchPossibleConversations = cancel
@@ -317,6 +333,7 @@ export default {
 			try {
 				this.listedConversationsLoading = true
 
+				// FIXME: move to conversationsStore
 				this.cancelSearchListedConversations('canceled')
 				const { request, cancel } = CancelableRequest(searchListedConversations)
 				this.cancelSearchListedConversations = cancel
@@ -347,16 +364,13 @@ export default {
 		 * @param {string} item.source The source of the target (e.g. users, groups, circle)
 		 */
 		async createAndJoinConversation(item) {
-			let response
 			if (item.source === 'users') {
 				// Create one-to-one conversation directly
-				response = await createOneToOneConversation(item.id)
-				const conversation = response.data.ocs.data
+				const conversation = await this.$store.dispatch('createOneToOneConversation', item.id)
 				this.abortSearch()
 				EventBus.$once('joinedConversation', ({ token }) => {
 					this.$refs.conversationsList.scrollToConversation(token)
 				})
-				this.$store.dispatch('addConversation', conversation)
 				this.$router.push({ name: 'conversation', params: { token: conversation.token } }).catch(err => console.debug(`Error while pushing the new conversation's route: ${err}`))
 			} else {
 				// For other types we start the conversation creation dialog
@@ -390,6 +404,7 @@ export default {
 		},
 
 		showSettings() {
+			// FIXME: use local EventBus service instead of the global one
 			emit('show-settings')
 		},
 
@@ -425,15 +440,8 @@ export default {
 			 * to the store.
 			 */
 			try {
-				const conversations = await fetchConversations()
+				await this.$store.dispatch('fetchConversations')
 				this.initialisedConversations = true
-				this.$store.dispatch('purgeConversationsStore')
-				conversations.data.ocs.data.forEach(conversation => {
-					this.$store.dispatch('addConversation', conversation)
-					if (conversation.token === this.$store.getters.getToken()) {
-						this.$store.dispatch('markConversationRead', this.$store.getters.getToken())
-					}
-				})
 				/**
 				 * Emits a global event that is used in App.vue to update the page title once the
 				 * ( if the current route is a conversation and once the conversations are received)
@@ -447,6 +455,15 @@ export default {
 				this.isFetchingConversations = false
 			}
 		},
+
+		// Checks whether the conversations list is scrolled all the way to the top
+		// or not
+		handleScroll() {
+			this.isScrolledToTop = this.$refs.scroller.scrollTop === 0
+		},
+		debounceHandleScroll: debounce(function() {
+			this.handleScroll()
+		}, 50),
 	},
 }
 </script>
@@ -457,8 +474,10 @@ export default {
 
 .new-conversation {
 	display: flex;
-	padding: 8px;
-	border-bottom: 1px solid var(--color-border-dark);
+	padding: 8px 8px 8px 4px;
+	&--scrolled-down {
+		border-bottom: 1px solid var(--color-border);
+	}
 }
 
 // Override vue overflow rules for <ul> elements within app-navigation
@@ -467,6 +486,7 @@ export default {
 	width: 100% !important;
 	overflow-y: auto !important;
 	overflow-x: hidden !important;
+	padding: 0 4px;
 }
 
 </style>

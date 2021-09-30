@@ -25,90 +25,101 @@
 			v-if="!remoteParticipantsCount && !screenSharingActive && !isGrid"
 			:is-sidebar="isSidebar" />
 		<div id="videos">
-			<LocalMediaControls
-				v-if="!isGrid"
-				class="local-media-controls"
-				:class="{ 'local-media-controls--sidebar': isSidebar }"
-				:model="localMediaModel"
-				:show-actions="!isSidebar"
-				:local-call-participant-model="localCallParticipantModel"
-				:screen-sharing-button-hidden="isSidebar"
-				@switch-screen-to-id="$emit('switchScreenToId', $event)" />
-			<!-- Promoted "autopilot" mode -->
-			<div v-if="showPromoted"
-				ref="videoContainer"
-				class="video__promoted autopilot"
-				:class="{'full-page': isOneToOne}">
-				<template v-for="callParticipantModel in reversedCallParticipantModels">
-					<Video
-						v-if="sharedDatas[callParticipantModel.attributes.peerId].promoted"
-						:key="callParticipantModel.attributes.peerId"
-						:token="token"
-						:model="callParticipantModel"
-						:shared-data="sharedDatas[callParticipantModel.attributes.peerId]"
-						:show-talking-highlight="false"
-						:is-grid="true"
-						:fit-video="true"
-						:is-big="true"
-						:is-sidebar="isSidebar"
-						@switchScreenToId="_switchScreenToId" />
-				</template>
-			</div>
-			<!-- Selected override mode -->
-			<div v-if="showSelected"
-				ref="videoContainer"
-				class="video__promoted autopilot"
-				:class="{'full-page': isOneToOne}">
-				<template v-for="callParticipantModel in reversedCallParticipantModels">
-					<Video
-						v-if="callParticipantModel.attributes.peerId === selectedVideoPeerId"
-						:key="callParticipantModel.attributes.selectedVideoPeerId"
-						:token="token"
-						:model="callParticipantModel"
-						:shared-data="sharedDatas[selectedVideoPeerId]"
-						:show-talking-highlight="false"
-						:is-grid="true"
-						:is-big="true"
-						:fit-video="true"
-						@switchScreenToId="_switchScreenToId" />
-				</template>
-			</div>
-			<!-- Local Video Override mode (following own video) -->
-			<div v-if="showLocalVideo"
-				ref="videoContainer"
-				class="video__promoted autopilot"
-				:class="{'full-page': isOneToOne}">
-				<LocalVideo
-					ref="localVideo"
-					:fit-video="true"
-					:is-stripe="false"
-					:show-controls="false"
-					:is-big="true"
-					:local-media-model="localMediaModel"
-					:video-container-aspect-ratio="videoContainerAspectRatio"
-					:local-call-participant-model="localCallParticipantModel"
-					:is-sidebar="false"
-					@switchScreenToId="1" />
-			</div>
-			<!-- Screens -->
-			<div v-if="!isSidebar && !isGrid && (showLocalScreen || showRemoteScreen)" id="screens">
-				<!-- local screen -->
-				<Screen v-show="showLocalScreen"
+			<template
+				v-if="!isGrid">
+				<LocalMediaControls
+					class="local-media-controls"
+					:class="{ 'local-media-controls--sidebar': isSidebar }"
 					:token="token"
-					:local-media-model="localMediaModel"
-					:shared-data="localSharedData"
-					:is-big="true" />
-				<!-- remote screen -->
-				<template v-for="callParticipantModel in reversedCallParticipantModels">
+					:model="localMediaModel"
+					:show-actions="!isSidebar"
+					:local-call-participant-model="localCallParticipantModel"
+					:screen-sharing-button-hidden="isSidebar"
+					@switch-screen-to-id="_switchScreenToId" />
+
+				<!-- Selected override mode -->
+				<div v-if="showSelected"
+					ref="videoContainer"
+					class="video__promoted selected-video"
+					:class="{'full-page': isOneToOne}">
+					<template v-for="callParticipantModel in reversedCallParticipantModels">
+						<Video
+							v-if="callParticipantModel.attributes.peerId === selectedVideoPeerId"
+							:key="callParticipantModel.attributes.selectedVideoPeerId"
+							:token="token"
+							:model="callParticipantModel"
+							:shared-data="sharedDatas[selectedVideoPeerId]"
+							:show-talking-highlight="false"
+							:is-grid="true"
+							:is-big="true"
+							:fit-video="true"
+							@switch-screen-to-id="_switchScreenToId" />
+					</template>
+				</div>
+				<!-- Screens -->
+				<div v-else-if="!isSidebar && (showLocalScreen || showRemoteScreen)" id="screens">
+					<!-- local screen -->
 					<Screen
-						v-if="callParticipantModel.attributes.peerId === shownRemoteScreenPeerId"
-						:key="'screen-' + callParticipantModel.attributes.peerId"
+						v-if="showLocalScreen"
 						:token="token"
-						:call-participant-model="callParticipantModel"
-						:shared-data="sharedDatas[shownRemoteScreenPeerId]"
+						:local-media-model="localMediaModel"
+						:shared-data="localSharedData"
 						:is-big="true" />
-				</template>
-			</div>
+					<!-- remote screen -->
+					<template
+						v-else>
+						<template
+							v-for="callParticipantModel in reversedCallParticipantModels">
+							<Screen
+								v-if="callParticipantModel.attributes.peerId === shownRemoteScreenPeerId"
+								:key="'screen-' + callParticipantModel.attributes.peerId"
+								:token="token"
+								:call-participant-model="callParticipantModel"
+								:shared-data="sharedDatas[shownRemoteScreenPeerId]"
+								:is-big="true" />
+						</template>
+					</template>
+				</div>
+				<!-- Local Video Override mode (following own video) -->
+				<div v-else-if="showLocalVideo"
+					ref="videoContainer"
+					class="video__promoted selected-video--local"
+					:class="{'full-page': isOneToOne}">
+					<LocalVideo
+						ref="localVideo"
+						:fit-video="true"
+						:is-stripe="false"
+						:show-controls="false"
+						:is-big="true"
+						:token="token"
+						:local-media-model="localMediaModel"
+						:video-container-aspect-ratio="videoContainerAspectRatio"
+						:local-call-participant-model="localCallParticipantModel"
+						:is-sidebar="false"
+						@switch-screen-to-id="_switchScreenToId" />
+				</div>
+				<!-- Promoted "autopilot" mode -->
+				<div v-else
+					ref="videoContainer"
+					class="video__promoted autopilot"
+					:class="{'full-page': isOneToOne}">
+					<template v-for="callParticipantModel in reversedCallParticipantModels">
+						<Video
+							v-if="sharedDatas[callParticipantModel.attributes.peerId].promoted"
+							:key="callParticipantModel.attributes.peerId"
+							:token="token"
+							:model="callParticipantModel"
+							:shared-data="sharedDatas[callParticipantModel.attributes.peerId]"
+							:show-talking-highlight="false"
+							:is-grid="true"
+							:fit-video="true"
+							:is-big="true"
+							:is-sidebar="isSidebar"
+							@switch-screen-to-id="_switchScreenToId" />
+					</template>
+				</div>
+			</template>
+
 			<!-- Stripe or fullscreen grid depending on `isGrid` -->
 			<Grid
 				v-if="!isSidebar"
@@ -124,6 +135,7 @@
 				:local-call-participant-model="localCallParticipantModel"
 				:shared-datas="sharedDatas"
 				@select-video="handleSelectVideo"
+				@switch-screen-to-id="_switchScreenToId"
 				@click-local-video="handleClickLocalVideo" />
 			<!-- Local video if sidebar -->
 			<LocalVideo
@@ -134,11 +146,12 @@
 				:show-controls="false"
 				:fit-video="true"
 				:is-stripe="true"
+				:token="token"
 				:local-media-model="localMediaModel"
 				:video-container-aspect-ratio="videoContainerAspectRatio"
 				:local-call-participant-model="localCallParticipantModel"
 				:is-sidebar="isSidebar"
-				@switchScreenToId="1"
+				@switch-screen-to-id="_switchScreenToId"
 				@click-video="handleClickLocalVideo" />
 		</div>
 	</div>
@@ -146,6 +159,7 @@
 
 <script>
 import Grid from './Grid/Grid'
+import { SIMULCAST } from '../../constants'
 import { localMediaModel, localCallParticipantModel, callParticipantCollection } from '../../utils/webrtc/index'
 import { fetchPeers } from '../../services/callsService'
 import { showMessage } from '@nextcloud/dialogs'
@@ -156,6 +170,7 @@ import LocalVideo from './shared/LocalVideo'
 import Screen from './shared/Screen'
 import debounce from 'debounce'
 import { EventBus } from '../../services/EventBus'
+import { subscribe, unsubscribe } from '@nextcloud/event-bus'
 
 export default {
 	name: 'CallView',
@@ -184,8 +199,8 @@ export default {
 	data() {
 		return {
 			screens: [],
-			localMediaModel: localMediaModel,
-			localCallParticipantModel: localCallParticipantModel,
+			localMediaModel,
+			localCallParticipantModel,
 			sharedDatas: {},
 			raisedHandUnwatchers: {},
 			speakingUnwatchers: {},
@@ -195,7 +210,7 @@ export default {
 			localSharedData: {
 				screenVisible: true,
 			},
-			callParticipantCollection: callParticipantCollection,
+			callParticipantCollection,
 			videoContainerAspectRatio: 0,
 		}
 	},
@@ -224,6 +239,10 @@ export default {
 			})
 		},
 
+		injectableLocalMediaModel() {
+			return localMediaModel
+		},
+
 		localScreen() {
 			return localMediaModel.attributes.localScreen
 		},
@@ -248,8 +267,12 @@ export default {
 			return this.$store.getters.selectedVideoPeerId
 		},
 
+		hasSelectedScreen() {
+			return this.selectedVideoPeerId !== null && this.screens.includes(this.selectedVideoPeerId)
+		},
+
 		hasSelectedVideo() {
-			return this.$store.getters.selectedVideoPeerId !== null
+			return this.selectedVideoPeerId !== null && !this.screens.includes(this.selectedVideoPeerId)
 		},
 
 		isOneToOne() {
@@ -273,29 +296,24 @@ export default {
 		// The following conditions determine what to show in the "Big container"
 		// of the promoted view
 
-		// Show local screen (has priority over anything else when screensharing)
-		showLocalScreen() {
-			return this.screens.filter(screen => screen === localCallParticipantModel.attributes.peerId).length === 1
+		// Show selected video (other than local)
+		showSelected() {
+			return this.hasSelectedVideo && !this.showLocalVideo
 		},
 
 		// Shows the local video if selected
 		showLocalVideo() {
-			return this.hasLocalVideo && this.$store.getters.selectedVideoPeerId === 'local'
+			return this.hasLocalVideo && this.selectedVideoPeerId === 'local'
 		},
 
-		// Show selected video (other than local)
-		showSelected() {
-			return !this.isGrid && this.hasSelectedVideo && !this.showLocalScreen && !this.showLocalVideo && !this.showRemoteScreen
-		},
-
-		// Show the current automatically promoted video
-		showPromoted() {
-			return !this.isGrid && !this.hasSelectedVideo && !this.screenSharingActive && !this.showLocalVideo
+		// Show local screen
+		showLocalScreen() {
+			return this.hasLocalScreen && this.selectedVideoPeerId === null
 		},
 
 		// Show somebody else's screen
 		showRemoteScreen() {
-			return this.shownRemoteScreenPeerId !== null && !this.showLocalVideo
+			return this.shownRemoteScreenPeerId !== null
 		},
 
 		shownRemoteScreenPeerId() {
@@ -307,61 +325,65 @@ export default {
 				return null
 			}
 
-			if (this.showLocalScreen) {
-				return null
-			}
-
-			if (!this.hasSelectedVideo) {
-				return this.screens[0]
-			}
-
 			if (this.screens.includes(this.selectedVideoPeerId)) {
 				return this.selectedVideoPeerId
+			}
+
+			if (!this.hasSelectedScreen) {
+				return this.screens[0]
 			}
 
 			return null
 		},
 	},
 	watch: {
-		localScreen: function(localScreen) {
+		localScreen(localScreen) {
 			this._setScreenAvailable(localCallParticipantModel.attributes.peerId, localScreen)
 		},
 
-		callParticipantModels: function(models) {
+		callParticipantModels(models) {
 			this.updateDataFromCallParticipantModels(models)
 		},
 
-		'speakers': function() {
+		isGrid() {
+			this.adjustSimulcastQuality()
+		},
+
+		selectedVideoPeerId() {
+			this.adjustSimulcastQuality()
+		},
+
+		speakers() {
 			this._setPromotedParticipant()
 		},
 
-		'screenSharingActive': function() {
+		screenSharingActive() {
 			this._setPromotedParticipant()
 		},
 
-		'screens': function() {
+		screens() {
 			this._setScreenVisible()
 
 		},
 
-		'callParticipantModelsWithScreen': function(newValue, previousValue) {
+		callParticipantModelsWithScreen(newValue, previousValue) {
 			// Everytime a new screen is shared, switch to promoted view
 			if (newValue.length > previousValue.length) {
 				this.$store.dispatch('startPresentation')
-			} else if (newValue.length === 0 && previousValue.length > 0) {
+			} else if (newValue.length === 0 && previousValue.length > 0 && !this.hasLocalScreen) {
 				// last screen share stopped, reopening stripe
 				this.$store.dispatch('stopPresentation')
 			}
 		},
-		'showLocalScreen': function(showLocalScreen) {
+		showLocalScreen(showLocalScreen) {
 			// Everytime the local screen is shared, switch to promoted view
 			if (showLocalScreen) {
 				this.$store.dispatch('startPresentation')
-			} else {
+			} else if (this.callParticipantModelsWithScreen.length === 0) {
 				this.$store.dispatch('stopPresentation')
 			}
 		},
-		'hasLocalVideo': function(newValue) {
+		hasLocalVideo(newValue) {
 			if (this.$store.getters.selectedVideoPeerId === 'local') {
 				if (!newValue) {
 					this.$store.dispatch('selectedVideoPeerId', null)
@@ -379,11 +401,15 @@ export default {
 		EventBus.$on('refreshPeerList', this.debounceFetchPeers)
 
 		callParticipantCollection.on('remove', this._lowerHandWhenParticipantLeaves)
+
+		subscribe('talk:video:toggled', this.handleToggleVideo)
 	},
 	beforeDestroy() {
 		EventBus.$off('refreshPeerList', this.debounceFetchPeers)
 
 		callParticipantCollection.off('remove', this._lowerHandWhenParticipantLeaves)
+
+		unsubscribe('talk:video:toggled', this.handleToggleVideo)
 	},
 	methods: {
 		/**
@@ -455,6 +481,8 @@ export default {
 				}, function(raisedHand) {
 					this._handleParticipantRaisedHand(addedModel, raisedHand)
 				})
+
+				this.adjustSimulcastQualityForParticipant(addedModel)
 			})
 		},
 
@@ -493,7 +521,7 @@ export default {
 			// sometimes the nick name is not available yet...
 			if (nickName) {
 				if (raisedHand?.state) {
-					showMessage(t('spreed', '{nickName} raised their hand.', { nickName: nickName }))
+					showMessage(t('spreed', '{nickName} raised their hand.', { nickName }))
 				}
 			} else {
 				if (raisedHand?.state) {
@@ -504,7 +532,7 @@ export default {
 			// update in callViewStore
 			this.$store.dispatch('setParticipantHandRaised', {
 				sessionId: callParticipantModel.attributes.nextcloudSessionId,
-				raisedHand: raisedHand,
+				raisedHand,
 			})
 		},
 
@@ -536,6 +564,8 @@ export default {
 			if (!this.screenSharingActive && this.speakers.length) {
 				this.sharedDatas[this.speakers[0].id].promoted = true
 			}
+
+			this.adjustSimulcastQuality()
 		},
 
 		_switchScreenToId(id) {
@@ -544,6 +574,8 @@ export default {
 				return
 			}
 
+			this.$store.dispatch('startPresentation')
+			this.$store.dispatch('selectedVideoPeerId', null)
 			this.screens.splice(index, 1)
 			this.screens.unshift(id)
 		},
@@ -609,6 +641,27 @@ export default {
 				console.error(exception)
 			}
 		}, 1500),
+
+		// Toggles videos on and off
+		handleToggleVideo({ peerId, value }) {
+			this.sharedDatas[peerId].videoEnabled = value
+		},
+
+		adjustSimulcastQuality() {
+			this.callParticipantModels.forEach(callParticipantModel => {
+				this.adjustSimulcastQualityForParticipant(callParticipantModel)
+			})
+		},
+
+		adjustSimulcastQualityForParticipant(callParticipantModel) {
+			if (this.isGrid) {
+				callParticipantModel.setSimulcastVideoQuality(SIMULCAST.MEDIUM)
+			} else if (this.sharedDatas[callParticipantModel.attributes.peerId].promoted || this.selectedVideoPeerId === callParticipantModel.attributes.peerId) {
+				callParticipantModel.setSimulcastVideoQuality(SIMULCAST.HIGH)
+			} else {
+				callParticipantModel.setSimulcastVideoQuality(SIMULCAST.LOW)
+			}
+		},
 	},
 }
 </script>
@@ -774,7 +827,7 @@ export default {
 }
 
 #videos .videoContainer.speaking:not(.videoView) ::v-deep .nameIndicator,
-#videos .videoContainer.videoView.speaking ::v-deep .nameIndicator .icon-audio {
+#videos .videoContainer.videoView.speaking ::v-deep .nameIndicator .microphone-icon {
 	animation: pulse 1s;
 	animation-iteration-count: infinite;
 }

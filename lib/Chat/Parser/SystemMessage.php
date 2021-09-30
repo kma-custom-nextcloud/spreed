@@ -23,32 +23,44 @@ declare(strict_types=1);
 
 namespace OCA\Talk\Chat\Parser;
 
+use OCA\DAV\CardDAV\PhotoCache;
+use OCA\Talk\Chat\ChatManager;
 use OCA\Talk\Exceptions\ParticipantNotFoundException;
 use OCA\Talk\GuestManager;
 use OCA\Talk\Model\Attendee;
 use OCA\Talk\Model\Message;
 use OCA\Talk\Participant;
+use OCA\Talk\Room;
 use OCA\Talk\Share\RoomShareProvider;
 use OCP\Comments\IComment;
+use OCP\Files\InvalidPathException;
 use OCP\Files\IRootFolder;
 use OCP\Files\Node;
 use OCP\Files\NotFoundException;
+use OCP\IGroup;
+use OCP\IGroupManager;
 use OCP\IL10N;
 use OCP\IPreview as IPreviewManager;
 use OCP\IURLGenerator;
 use OCP\IUser;
 use OCP\IUserManager;
+use OCP\Share\Exceptions\ShareNotFound;
+use Sabre\VObject\Reader;
 
 class SystemMessage {
 
 	/** @var IUserManager */
 	protected $userManager;
+	/** @var IGroupManager */
+	protected $groupManager;
 	/** @var GuestManager */
 	protected $guestManager;
 	/** @var IPreviewManager */
 	protected $previewManager;
 	/** @var RoomShareProvider */
 	protected $shareProvider;
+	/** @var PhotoCache */
+	protected $photoCache;
 	/** @var IRootFolder */
 	protected $rootFolder;
 	/** @var IURLGenerator */
@@ -59,18 +71,24 @@ class SystemMessage {
 	/** @var string[] */
 	protected $displayNames = [];
 	/** @var string[] */
+	protected $groupNames = [];
+	/** @var string[] */
 	protected $guestNames = [];
 
 	public function __construct(IUserManager $userManager,
+								IGroupManager $groupManager,
 								GuestManager $guestManager,
 								IPreviewManager $previewManager,
 								RoomShareProvider $shareProvider,
+								PhotoCache $photoCache,
 								IRootFolder $rootFolder,
 								IURLGenerator $url) {
 		$this->userManager = $userManager;
+		$this->groupManager = $groupManager;
 		$this->guestManager = $guestManager;
 		$this->previewManager = $previewManager;
 		$this->shareProvider = $shareProvider;
+		$this->photoCache = $photoCache;
 		$this->rootFolder = $rootFolder;
 		$this->url = $url;
 	}
@@ -82,6 +100,7 @@ class SystemMessage {
 	public function parseMessage(Message $chatMessage): void {
 		$this->l = $chatMessage->getL10n();
 		$comment = $chatMessage->getComment();
+		$room = $chatMessage->getRoom();
 		$data = json_decode($chatMessage->getMessage(), true);
 		if (!\is_array($data)) {
 			throw new \OutOfBoundsException('Invalid message');
@@ -89,7 +108,7 @@ class SystemMessage {
 
 		$message = $data['message'];
 		$parameters = $data['parameters'];
-		$parsedParameters = ['actor' => $this->getActorFromComment($comment)];
+		$parsedParameters = ['actor' => $this->getActorFromComment($room, $comment)];
 
 		$participant = $chatMessage->getParticipant();
 		if (!$participant->isGuest()) {
@@ -121,11 +140,11 @@ class SystemMessage {
 				$parsedMessage = $this->l->t('An administrator renamed the conversation from "%1$s" to "%2$s"', [$parameters['oldName'], $parameters['newName']]);
 			}
 		} elseif ($message === 'description_set') {
-			$parsedMessage = $this->l->t('{actor} set the description to "%1$s"', [$parameters['newDescription']]);
+			$parsedMessage = $this->l->t('{actor} set the description');
 			if ($currentUserIsActor) {
-				$parsedMessage = $this->l->t('You set the description to "%1$s"', [$parameters['newDescription']]);
+				$parsedMessage = $this->l->t('You set the description');
 			} elseif ($cliIsActor) {
-				$parsedMessage = $this->l->t('An administrator set the description to "%1$s"', [$parameters['newDescription']]);
+				$parsedMessage = $this->l->t('An administrator set the description');
 			}
 		} elseif ($message === 'description_removed') {
 			$parsedMessage = $this->l->t('{actor} removed the description');
@@ -149,6 +168,8 @@ class SystemMessage {
 			if ($currentUserIsActor) {
 				$parsedMessage = $this->l->t('You left the call');
 			}
+		} elseif ($message === 'call_missed') {
+			[$parsedMessage, $parsedParameters, $message] = $this->parseMissedCall($room, $parameters, $currentActorId);
 		} elseif ($message === 'call_ended') {
 			[$parsedMessage, $parsedParameters] = $this->parseCall($parameters);
 		} elseif ($message === 'read_only_off') {
@@ -266,6 +287,22 @@ class SystemMessage {
 					$parsedMessage = $this->l->t('An administrator removed {user}');
 				}
 			}
+		} elseif ($message === 'group_added') {
+			$parsedParameters['group'] = $this->getGroup($parameters['group']);
+			$parsedMessage = $this->l->t('{actor} added group {group}');
+			if ($currentUserIsActor) {
+				$parsedMessage = $this->l->t('You added group {group}');
+			} elseif ($cliIsActor) {
+				$parsedMessage = $this->l->t('An administrator added group {group}');
+			}
+		} elseif ($message === 'group_removed') {
+			$parsedParameters['group'] = $this->getGroup($parameters['group']);
+			$parsedMessage = $this->l->t('{actor} removed group {group}');
+			if ($currentUserIsActor) {
+				$parsedMessage = $this->l->t('You removed group {group}');
+			} elseif ($cliIsActor) {
+				$parsedMessage = $this->l->t('An administrator removed group {group}');
+			}
 		} elseif ($message === 'moderator_promoted') {
 			$parsedParameters['user'] = $this->getUser($parameters['user']);
 			$parsedMessage = $this->l->t('{actor} promoted {user} to moderator');
@@ -293,7 +330,7 @@ class SystemMessage {
 				$parsedMessage = $this->l->t('An administrator demoted {user} from moderator');
 			}
 		} elseif ($message === 'guest_moderator_promoted') {
-			$parsedParameters['user'] = $this->getGuest($parameters['session']);
+			$parsedParameters['user'] = $this->getGuest($room, $parameters['session']);
 			$parsedMessage = $this->l->t('{actor} promoted {user} to moderator');
 			if ($currentUserIsActor) {
 				$parsedMessage = $this->l->t('You promoted {user} to moderator');
@@ -306,7 +343,7 @@ class SystemMessage {
 				$parsedMessage = $this->l->t('An administrator promoted {user} to moderator');
 			}
 		} elseif ($message === 'guest_moderator_demoted') {
-			$parsedParameters['user'] = $this->getGuest($parameters['session']);
+			$parsedParameters['user'] = $this->getGuest($room, $parameters['session']);
 			$parsedMessage = $this->l->t('{actor} demoted {user} from moderator');
 			if ($currentUserIsActor) {
 				$parsedMessage = $this->l->t('You demoted {user} from moderator');
@@ -322,7 +359,12 @@ class SystemMessage {
 			try {
 				$parsedParameters['file'] = $this->getFileFromShare($participant, $parameters['share']);
 				$parsedMessage = '{file}';
-				$chatMessage->setMessageType('comment');
+				$metaData = $parameters['metaData'] ?? [];
+				if (isset($metaData['messageType']) && $metaData['messageType'] === 'voice-message') {
+					$chatMessage->setMessageType('voice-message');
+				} else {
+					$chatMessage->setMessageType('comment');
+				}
 			} catch (\Exception $e) {
 				$parsedMessage = $this->l->t('{actor} shared a file which is no longer available');
 				if ($currentUserIsActor) {
@@ -332,36 +374,49 @@ class SystemMessage {
 		} elseif ($message === 'object_shared') {
 			$parsedParameters['object'] = $parameters['metaData'];
 			$parsedMessage = '{object}';
+
+			if (isset($parsedParameters['object']['type'])
+				&& $parsedParameters['object']['type'] === 'geo-location'
+				&& !preg_match(ChatManager::GEO_LOCATION_VALIDATOR, $parsedParameters['object']['id'])) {
+				$parsedParameters = [];
+				$parsedMessage = $this->l->t('The shared location is malformed');
+			}
+
 			$chatMessage->setMessageType('comment');
 		} elseif ($message === 'matterbridge_config_added') {
-			$parsedMessage = $this->l->t('{actor} set up Matterbridge to synchronize this conversation with other chats.');
+			$parsedMessage = $this->l->t('{actor} set up Matterbridge to synchronize this conversation with other chats');
 			if ($currentUserIsActor) {
-				$parsedMessage = $this->l->t('You set up Matterbridge to synchronize this conversation with other chats.');
+				$parsedMessage = $this->l->t('You set up Matterbridge to synchronize this conversation with other chats');
 			}
 		} elseif ($message === 'matterbridge_config_edited') {
-			$parsedMessage = $this->l->t('{actor} updated the Matterbridge configuration.');
+			$parsedMessage = $this->l->t('{actor} updated the Matterbridge configuration');
 			if ($currentUserIsActor) {
-				$parsedMessage = $this->l->t('You updated the Matterbridge configuration.');
+				$parsedMessage = $this->l->t('You updated the Matterbridge configuration');
 			}
 		} elseif ($message === 'matterbridge_config_removed') {
-			$parsedMessage = $this->l->t('{actor} removed the Matterbridge configuration.');
+			$parsedMessage = $this->l->t('{actor} removed the Matterbridge configuration');
 			if ($currentUserIsActor) {
-				$parsedMessage = $this->l->t('You removed the Matterbridge configuration.');
+				$parsedMessage = $this->l->t('You removed the Matterbridge configuration');
 			}
 		} elseif ($message === 'matterbridge_config_enabled') {
-			$parsedMessage = $this->l->t('{actor} started Matterbridge.');
+			$parsedMessage = $this->l->t('{actor} started Matterbridge');
 			if ($currentUserIsActor) {
-				$parsedMessage = $this->l->t('You started Matterbridge.');
+				$parsedMessage = $this->l->t('You started Matterbridge');
 			}
 		} elseif ($message === 'matterbridge_config_disabled') {
-			$parsedMessage = $this->l->t('{actor} stopped Matterbridge.');
+			$parsedMessage = $this->l->t('{actor} stopped Matterbridge');
 			if ($currentUserIsActor) {
-				$parsedMessage = $this->l->t('You stopped Matterbridge.');
+				$parsedMessage = $this->l->t('You stopped Matterbridge');
 			}
 		} elseif ($message === 'message_deleted') {
 			$parsedMessage = $this->l->t('{actor} deleted a message');
 			if ($currentUserIsActor) {
 				$parsedMessage = $this->l->t('You deleted a message');
+			}
+		} elseif ($message === 'history_cleared') {
+			$parsedMessage = $this->l->t('{actor} cleared the history of the conversation');
+			if ($currentUserIsActor) {
+				$parsedMessage = $this->l->t('You cleared the history of the conversation');
 			}
 		} else {
 			throw new \OutOfBoundsException('Unknown subject');
@@ -380,8 +435,9 @@ class SystemMessage {
 		if (!\is_array($data)) {
 			throw new \OutOfBoundsException('Invalid message');
 		}
+		$room = $chatMessage->getRoom();
 
-		$parsedParameters = ['actor' => $this->getActor($data['deleted_by_type'], $data['deleted_by_id'])];
+		$parsedParameters = ['actor' => $this->getActor($room, $data['deleted_by_type'], $data['deleted_by_id'])];
 
 		$participant = $chatMessage->getParticipant();
 		$currentActorId = $participant->getAttendee()->getActorId();
@@ -420,9 +476,9 @@ class SystemMessage {
 	 * @param Participant $participant
 	 * @param string $shareId
 	 * @return array
-	 * @throws \OCP\Files\InvalidPathException
-	 * @throws \OCP\Files\NotFoundException
-	 * @throws \OCP\Share\Exceptions\ShareNotFound
+	 * @throws InvalidPathException
+	 * @throws NotFoundException
+	 * @throws ShareNotFound
 	 */
 	protected function getFileFromShare(Participant $participant, string $shareId): array {
 		$share = $this->shareProvider->getShareById($shareId);
@@ -473,7 +529,7 @@ class SystemMessage {
 			]);
 		}
 
-		return [
+		$data = [
 			'type' => 'file',
 			'id' => (string) $node->getId(),
 			'name' => $name,
@@ -483,15 +539,32 @@ class SystemMessage {
 			'mimetype' => $node->getMimeType(),
 			'preview-available' => $this->previewManager->isAvailable($node) ? 'yes' : 'no',
 		];
+
+		if ($node->getMimeType() === 'text/vcard') {
+			$vCard = $node->getContent();
+
+			$vObject = Reader::read($vCard);
+			if (!empty($vObject->FN)) {
+				$data['contact-name'] = (string) $vObject->FN;
+			}
+
+			$photo = $this->photoCache->getPhotoFromVObject($vObject);
+			if ($photo) {
+				$data['contact-photo-mimetype'] = $photo['Content-Type'];
+				$data['contact-photo'] = base64_encode($photo['body']);
+			}
+		}
+
+		return $data;
 	}
 
-	protected function getActorFromComment(IComment $comment): array {
-		return $this->getActor($comment->getActorType(), $comment->getActorId());
+	protected function getActorFromComment(Room $room, IComment $comment): array {
+		return $this->getActor($room, $comment->getActorType(), $comment->getActorId());
 	}
 
-	protected function getActor(string $actorType, string $actorId): array {
+	protected function getActor(Room $room, string $actorType, string $actorId): array {
 		if ($actorType === Attendee::ACTOR_GUESTS) {
-			return $this->getGuest($actorId);
+			return $this->getGuest($room, $actorId);
 		}
 
 		return $this->getUser($actorId);
@@ -509,6 +582,18 @@ class SystemMessage {
 		];
 	}
 
+	protected function getGroup(string $gid): array {
+		if (!isset($this->groupNames[$gid])) {
+			$this->groupNames[$gid] = $this->getDisplayNameGroup($gid);
+		}
+
+		return [
+			'type' => 'group',
+			'id' => $gid,
+			'name' => $this->groupNames[$gid],
+		];
+	}
+
 	protected function getDisplayName(string $uid): string {
 		$user = $this->userManager->get($uid);
 		if ($user instanceof IUser) {
@@ -517,25 +602,66 @@ class SystemMessage {
 		return $uid;
 	}
 
-	protected function getGuest(string $sessionHash): array {
-		if (!isset($this->guestNames[$sessionHash])) {
-			$this->guestNames[$sessionHash] = $this->getGuestName($sessionHash);
+	protected function getDisplayNameGroup(string $gid): string {
+		$group = $this->groupManager->get($gid);
+		if ($group instanceof IGroup) {
+			return $group->getDisplayName();
+		}
+		return $gid;
+	}
+
+	protected function getGuest(Room $room, string $actorId): array {
+		if (!isset($this->guestNames[$actorId])) {
+			$this->guestNames[$actorId] = $this->getGuestName($room, $actorId);
 		}
 
 		return [
 			'type' => 'guest',
-			'id' => 'guest/' . $sessionHash,
-			'name' => $this->guestNames[$sessionHash],
+			'id' => 'guest/' . $actorId,
+			'name' => $this->guestNames[$actorId],
 		];
 	}
 
-	protected function getGuestName(string $sessionHash): string {
+	protected function getGuestName(Room $room, string $actorId): string {
 		try {
-			return $this->l->t('%s (guest)', [$this->guestManager->getNameBySessionHash($sessionHash)]);
+			$participant = $room->getParticipantByActor(Attendee::ACTOR_GUESTS, $actorId, false);
+			$name = $participant->getAttendee()->getDisplayName();
+			if ($name === '') {
+				return $this->l->t('Guest');
+			}
+			return $this->l->t('%s (guest)', [$name]);
 		} catch (ParticipantNotFoundException $e) {
 			return $this->l->t('Guest');
 		}
 	}
+
+	protected function parseMissedCall(Room $room, array $parameters, string $currentActorId): array {
+		if ($parameters['users'][0] !== $currentActorId) {
+			return [
+				$this->l->t('You missed a call from {user}'),
+				[
+					'user' => $this->getUser($parameters['users'][0]),
+				],
+				'call_missed',
+			];
+		}
+
+		$participants = json_decode($room->getName(), true);
+		$other = '';
+		foreach ($participants as $participant) {
+			if ($participant !== $currentActorId) {
+				$other = $participant;
+			}
+		}
+		return [
+			$this->l->t('You tried to call {user}'),
+			[
+				'user' => $this->getUser($other),
+			],
+			'call_tried',
+		];
+	}
+
 
 	protected function parseCall(array $parameters): array {
 		sort($parameters['users']);

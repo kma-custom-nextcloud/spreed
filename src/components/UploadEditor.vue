@@ -22,37 +22,47 @@
 <template>
 	<Modal v-if="showModal"
 		class="upload-editor"
+		:container="container"
 		@close="handleDismiss">
-		<!--native file picker, hidden -->
-		<input id="file-upload"
-			ref="fileUploadInput"
-			multiple
-			type="file"
-			class="hidden-visually"
-			@change="handleFileInput">
-		<transition-group
-			class="upload-editor__previews"
-			name="fade"
-			tag="div">
-			<template v-for="file in files">
-				<FilePreview
-					:key="file.temporaryMessage.id"
-					v-bind="file.temporaryMessage.messageParameters.file"
-					:is-upload-editor="true"
-					@remove-file="handleRemoveFileFromSelection" />
-			</template>
-			<div :key="'addMore'" class="add-more">
-				<button :aria-label="addMoreAriaLabel"
-					class="add-more__button primary"
-					@click="clickImportInput">
-					<Plus
-						decorative
-						title=""
-						:size="48"
-						class="upload-editor__plus-icon" />
-				</button>
-			</div>
-		</transition-group>
+		<template v-if="!isVoiceMessage">
+			<!--native file picker, hidden -->
+			<input id="file-upload"
+				ref="fileUploadInput"
+				multiple
+				type="file"
+				class="hidden-visually"
+				@change="handleFileInput">
+			<transition-group
+				class="upload-editor__previews"
+				name="fade"
+				tag="div">
+				<template v-for="file in files">
+					<FilePreview
+						:key="file.temporaryMessage.id"
+						v-bind="file.temporaryMessage.messageParameters.file"
+						:is-upload-editor="true"
+						@remove-file="handleRemoveFileFromSelection" />
+				</template>
+				<div
+					:key="'addMore'"
+					class="add-more">
+					<button :aria-label="addMoreAriaLabel"
+						class="add-more__button primary"
+						@click="clickImportInput">
+						<Plus
+							decorative
+							title=""
+							:size="48"
+							class="upload-editor__plus-icon" />
+					</button>
+				</div>
+			</transition-group>
+		</template>
+		<template v-else>
+			<AudioPlayer
+				:name="voiceMessageName"
+				:local-url="voiceMessageLocalURL" />
+		</template>
 		<div class="upload-editor__actions">
 			<button @click="handleDismiss">
 				{{ t('spreed', 'Dismiss') }}
@@ -69,7 +79,7 @@
 import Modal from '@nextcloud/vue/dist/Components/Modal'
 import FilePreview from './MessagesList/MessagesGroup/Message/MessagePart/FilePreview.vue'
 import Plus from 'vue-material-design-icons/Plus'
-import { processFiles } from '../utils/fileUpload'
+import AudioPlayer from './MessagesList/MessagesGroup/Message/MessagePart/AudioPlayer.vue'
 
 export default {
 	name: 'UploadEditor',
@@ -78,6 +88,7 @@ export default {
 		Modal,
 		FilePreview,
 		Plus,
+		AudioPlayer,
 	},
 
 	computed: {
@@ -100,8 +111,39 @@ export default {
 			return !!this.currentUploadId
 		},
 
+		container() {
+			return this.$store.getters.getMainContainerSelector()
+		},
+
 		addMoreAriaLabel() {
 			return t('spreed', 'Add more files')
+		},
+
+		firstFile() {
+			return this.files[Object.keys(this.files)[0]]
+		},
+
+		// Hide the plus button in case this editor is used while sending a voice
+		// message
+		isVoiceMessage() {
+			if (!this.firstFile) {
+				return false
+			}
+			return this.firstFile.temporaryMessage.messageType === 'voice-message'
+		},
+
+		voiceMessageName() {
+			if (!this.firstFile.file.name) {
+				return ''
+			}
+			return this.firstFile.file.name
+		},
+
+		voiceMessageLocalURL() {
+			if (!this.firstFile.file.localURL) {
+				return ''
+			}
+			return this.firstFile.file.localURL
 		},
 	},
 
@@ -135,9 +177,9 @@ export default {
 			this.$refs.fileUploadInput.click()
 		},
 
-		handleFileInput(event) {
+		async handleFileInput(event) {
 			const files = Object.values(event.target.files)
-			processFiles(files, this.token, this.currentUploadId)
+			await this.$store.dispatch('initialiseUpload', { files, token: this.token, uploadId: this.currentUploadId })
 		},
 
 		handleRemoveFileFromSelection(id) {

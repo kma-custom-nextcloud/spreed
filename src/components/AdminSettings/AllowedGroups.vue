@@ -30,7 +30,7 @@
 			{{ t('spreed', 'Guests can still join public conversations.') }}
 		</p>
 		<p class="settings-hint">
-			{{ t('spreed', 'Users that can not use Talk anymore will still be listed as participants in their previous conversations and also their chat messages will be kept.') }}
+			{{ t('spreed', 'Users that cannot use Talk anymore will still be listed as participants in their previous conversations and also their chat messages will be kept.') }}
 		</p>
 
 		<p class="allowed-groups-settings-content">
@@ -165,7 +165,7 @@ export default {
 		searchGroup: debounce(async function(query) {
 			this.loadingGroups = true
 			try {
-				const response = await axios.get(generateOcsUrl('cloud', 2) + 'groups/details', {
+				const response = await axios.get(generateOcsUrl('cloud/groups/details'), {
 					search: query,
 					limit: 20,
 					offset: 0,

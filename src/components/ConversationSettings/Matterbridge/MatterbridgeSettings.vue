@@ -72,6 +72,7 @@
 						class="icon icon-edit"
 						@click="showLogContent" />
 					<Modal v-if="logModal"
+						:container="container"
 						@close="closeLogModal">
 						<div class="modal__content">
 							<textarea v-model="processLog" class="log-content" />
@@ -236,7 +237,7 @@ export default {
 						},
 						login: {
 							type: 'text',
-							placeholder: t('spreed', 'User name or e-mail address'),
+							placeholder: t('spreed', 'User name or email address'),
 							icon: 'icon-user',
 						},
 						password: {
@@ -248,6 +249,10 @@ export default {
 							type: 'text',
 							placeholder: t('spreed', 'Rocket.Chat channel'),
 							icon: 'icon-group',
+						},
+						skiptls: {
+							type: 'checkbox',
+							labelText: t('spreed', 'Skip TLS verification'),
 						},
 					},
 					mainField: 'server',
@@ -480,6 +485,10 @@ export default {
 							placeholder: t('spreed', 'Channel'),
 							icon: 'icon-group',
 						},
+						skiptls: {
+							type: 'checkbox',
+							labelText: t('spreed', 'Skip TLS verification'),
+						},
 					},
 					mainField: 'channel',
 				},
@@ -520,6 +529,9 @@ export default {
 					: this.enabled
 						? t('spreed', 'not running, check Matterbridge log')
 						: t('spreed', 'not running')
+		},
+		container() {
+			return this.$store.getters.getMainContainerSelector()
 		},
 	},
 

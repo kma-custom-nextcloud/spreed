@@ -34,17 +34,9 @@
 		@update:title="handleUpdateTitle"
 		@submit-title="handleSubmitTitle"
 		@dismiss-editing="dismissEditing"
+		@closed="handleClosed"
 		@close="handleClose">
 		<template slot="description">
-			<Description
-				v-if="showDescription"
-				:editable="canFullModerate"
-				:description="description"
-				:editing="isEditingDescription"
-				:loading="isDescriptionLoading"
-				:placeholder="t('spreed', 'Add a description for this conversation')"
-				@submit:description="handleUpdateDescription"
-				@update:editing="handleEditDescription" />
 			<LobbyStatus v-if="canFullModerate && hasLobbyEnabled" :token="token" />
 		</template>
 		<AppSidebarTab
@@ -53,14 +45,16 @@
 			:order="1"
 			:name="t('spreed', 'Chat')"
 			icon="icon-comment">
-			<ChatView :token="token" />
+			<ChatView :is-visible="opened" />
 		</AppSidebarTab>
 		<AppSidebarTab v-if="getUserId"
 			id="participants"
+			ref="participantsTab"
 			:order="2"
 			:name="t('spreed', 'Participants')"
 			icon="icon-contacts-dark">
 			<ParticipantsTab
+				:is-active="activeTab === 'participants'"
 				:can-search="canSearchParticipants"
 				:can-add="canAddParticipants" />
 		</AppSidebarTab>
@@ -103,10 +97,7 @@ import ParticipantsTab from './Participants/ParticipantsTab'
 import isInLobby from '../../mixins/isInLobby'
 import SetGuestUsername from '../SetGuestUsername'
 import SipSettings from './SipSettings'
-import Description from './Description/Description'
 import LobbyStatus from './LobbyStatus'
-import { EventBus } from '../../services/EventBus'
-import { showError } from '@nextcloud/dialogs'
 
 export default {
 	name: 'RightSidebar',
@@ -118,7 +109,6 @@ export default {
 		ParticipantsTab,
 		SetGuestUsername,
 		SipSettings,
-		Description,
 		LobbyStatus,
 	},
 
@@ -139,8 +129,6 @@ export default {
 			contactsLoading: false,
 			// The conversation name (while editing)
 			conversationName: '',
-			isEditingDescription: false,
-			isDescriptionLoading: false,
 			// Sidebar status before starting editing operation
 			sidebarOpenBeforeEditingName: '',
 		}
@@ -215,18 +203,6 @@ export default {
 				&& this.conversation.attendeePin
 		},
 
-		description() {
-			return this.conversation.description
-		},
-
-		showDescription() {
-			if (this.canFullModerate) {
-				return this.conversation.type !== CONVERSATION.TYPE.ONE_TO_ONE
-			} else {
-				return this.description !== ''
-			}
-		},
-
 		hasLobbyEnabled() {
 			return this.conversation.lobbyState === WEBINAR.LOBBY.NON_MODERATORS
 		},
@@ -239,14 +215,12 @@ export default {
 				this.conversationName = this.conversation.displayName
 			}
 		},
-	},
 
-	mounted() {
-		EventBus.$on('routeChange', this.handleRouteChange)
-	},
-
-	beforeDestroy() {
-		EventBus.$off('routeChange', this.handleRouteChange)
+		token() {
+			if (this.$refs.participantsTab) {
+				this.$refs.participantsTab.$el.scrollTop = 0
+			}
+		},
 	},
 
 	methods: {
@@ -278,7 +252,7 @@ export default {
 			try {
 				await this.$store.dispatch('setConversationName', {
 					token: this.token,
-					name: name,
+					name,
 				})
 				this.dismissEditing()
 			} catch (exception) {
@@ -294,29 +268,8 @@ export default {
 			emit('show-settings')
 		},
 
-		async handleUpdateDescription(description) {
-			this.isDescriptionLoading = true
-			try {
-				await this.$store.dispatch('setConversationDescription', {
-					token: this.token,
-					description,
-				})
-				this.isEditingDescription = false
-			} catch (error) {
-				console.error('Error while setting conversation description', error)
-				showError(t('spreed', 'Error while updating conversation description'))
-			}
-			this.isDescriptionLoading = false
-		},
-
-		handleEditDescription(payload) {
-			this.isEditingDescription = payload
-		},
-
-		handleRouteChange() {
-			// Reset description data on route change
-			this.isEditingDescription = false
-			this.isDescriptionLoading = false
+		handleClosed() {
+			emit('files:sidebar:closed')
 		},
 	},
 }
@@ -337,6 +290,7 @@ export default {
 .app-sidebar-tabs__content #tab-chat {
 	/* Remove padding to maximize the space for the chat view. */
 	padding: 0;
+	height: 100%;
 }
 
 </style>

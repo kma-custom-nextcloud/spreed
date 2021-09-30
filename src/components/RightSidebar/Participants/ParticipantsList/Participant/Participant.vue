@@ -43,12 +43,13 @@
 			:preloaded-user-status="preloadedUserStatus"
 			:name="computedName"
 			:source="participant.source || participant.actorType"
-			:offline="isOffline" />
+			:offline="isOffline"
+			:menu-container="container" />
 		<div
 			class="participant-row__user-wrapper"
 			:class="{
 				'has-call-icon': callIcon,
-				'has-menu-icon': canModerate && !isSearched
+				'has-menu-icon': canBeModerated && !isSearched
 			}">
 			<div
 				ref="userName"
@@ -58,6 +59,7 @@
 					v-tooltip.auto="userTooltipText"
 					class="participant-row__user-name">{{ computedName }}</span>
 				<span v-if="showModeratorLabel" class="participant-row__moderator-indicator">({{ t('spreed', 'moderator') }})</span>
+				<span v-if="isBridgeBotUser" class="participant-row__moderator-indicator">({{ t('spreed', 'bot') }})</span>
 				<span v-if="isGuest" class="participant-row__guest-indicator">({{ t('spreed', 'guest') }})</span>
 			</div>
 			<div
@@ -94,9 +96,10 @@
 				decorative />
 		</div>
 		<Actions
-			v-if="canModerate && !isSearched"
-			container="#content-vue"
+			v-if="canBeModerated && !isSearched"
+			:container="container"
 			:aria-label="participantSettingsAriaLabel"
+			:force-menu="true"
 			class="participant-row__actions">
 			<ActionText
 				v-if="attendeePin"
@@ -122,12 +125,18 @@
 				@click="resendInvitation">
 				{{ t('spreed', 'Resend invitation') }}
 			</ActionButton>
-			<ActionSeparator />
+			<ActionSeparator
+				v-if="attendeePin || canBePromoted || canBeDemoted || isEmailActor" />
 			<ActionButton
 				icon="icon-delete"
 				:close-after-click="true"
 				@click="removeParticipant">
-				{{ t('spreed', 'Remove participant') }}
+				<template v-if="isGroup">
+					{{ t('spreed', 'Remove group and members') }}
+				</template>
+				<template v-else>
+					{{ t('spreed', 'Remove participant') }}
+				</template>
 			</ActionButton>
 		</Actions>
 		<div v-if="isSelected" class="icon-checkmark participant-row__utils utils__checkmark" />
@@ -181,6 +190,10 @@ export default {
 			type: Object,
 			required: true,
 		},
+		/**
+		 * Whether to show the user status on the avatar.
+		 * This does not affect the status message row.
+		 */
 		showUserStatus: {
 			type: Boolean,
 			default: true,
@@ -200,6 +213,10 @@ export default {
 	},
 
 	computed: {
+		container() {
+			return this.$store.getters.getMainContainerSelector()
+		},
+
 		participantSettingsAriaLabel() {
 			return t('spreed', 'Settings for participant "{user}"', { user: this.computedName })
 		},
@@ -218,6 +235,9 @@ export default {
 			let text = this.computedName
 			if (this.showModeratorLabel) {
 				text += ' (' + t('spreed', 'moderator') + ')'
+			}
+			if (this.isBridgeBotUser) {
+				text += ' (' + t('spreed', 'bot') + ')'
 			}
 			if (this.isGuest) {
 				text += ' (' + t('spreed', 'guest') + ')'
@@ -301,8 +321,8 @@ export default {
 				return false
 			}
 
-			const state = this.$store.getters.isParticipantRaisedHand(this.participant.sessionId)
-			return state
+			const raisedState = this.$store.getters.getParticipantRaisedHand(this.participant.sessionIds)
+			return raisedState.state
 		},
 		callIcon() {
 			if (this.isSearched || this.participant.inCall === PARTICIPANT.CALL_FLAG.DISCONNECTED) {
@@ -336,8 +356,8 @@ export default {
 		participantType() {
 			return this.participant.participantType
 		},
-		sessionId() {
-			return this.participant.sessionId
+		sessionIds() {
+			return this.participant.sessionIds || []
 		},
 		lastPing() {
 			return this.participant.lastPing
@@ -360,14 +380,13 @@ export default {
 			}
 		},
 
-		isSelf() {
-			// User
-			if (this.userId) {
-				return this.$store.getters.getUserId() === this.userId
-			}
+		isBridgeBotUser() {
+			return this.participant.actorType === ATTENDEE.ACTOR_TYPE.USERS
+				&& this.participant.actorId === ATTENDEE.BRIDGE_BOT_ID
+		},
 
-			// Guest
-			return this.sessionId !== '0' && this.sessionId === this.currentParticipant.sessionId
+		isSelf() {
+			return this.sessionIds.length && this.sessionIds.indexOf(this.currentParticipant.sessionId) >= 0
 		},
 		selfIsModerator() {
 			return this.participantTypeIsModerator(this.currentParticipant.participantType)
@@ -377,12 +396,15 @@ export default {
 			/**
 			 * For now the user status is not overwriting the online-offline status anymore
 			 * It felt too weird having users appear as offline but they are in the call or chat actively
-			 return this.participant.status === 'offline' || this.sessionId === '0'
+			 return this.participant.status === 'offline' ||  !this.sessionIds.length && !this.isSearched
 			 */
-			return this.sessionId === '0'
+			return !this.sessionIds.length && !this.isSearched
 		},
 		isGuest() {
 			return [PARTICIPANT.TYPE.GUEST, PARTICIPANT.TYPE.GUEST_MODERATOR].indexOf(this.participantType) !== -1
+		},
+		isGroup() {
+			return this.participant.actorType === ATTENDEE.ACTOR_TYPE.GROUPS
 		},
 		isModerator() {
 			return this.participantTypeIsModerator(this.participantType)
@@ -391,18 +413,24 @@ export default {
 			return this.isModerator
 				&& [CONVERSATION.TYPE.ONE_TO_ONE, CONVERSATION.TYPE.CHANGELOG].indexOf(this.conversation.type) === -1
 		},
-		canModerate() {
-			return this.participantType !== PARTICIPANT.TYPE.OWNER && !this.isSelf && this.selfIsModerator
+		canBeModerated() {
+			return this.participantType !== PARTICIPANT.TYPE.OWNER
+				&& !this.isSelf
+				&& this.selfIsModerator
+				&& !this.isBridgeBotUser
 		},
 		canBeDemoted() {
-			return this.canModerate
+			return this.canBeModerated
 				&& [PARTICIPANT.TYPE.MODERATOR, PARTICIPANT.TYPE.GUEST_MODERATOR].indexOf(this.participantType) !== -1
+				&& !this.isGroup
 		},
 		canBePromoted() {
-			return this.canModerate && !this.isModerator
+			return this.canBeModerated
+				&& !this.isModerator
+				&& !this.isGroup
 		},
 		preloadedUserStatus() {
-			if (this.participant.hasOwnProperty('statusMessage')) {
+			if (Object.prototype.hasOwnProperty.call(this.participant, 'statusMessage')) {
 				// We preloaded the status when via participants API
 				return {
 					status: this.participant.status || null,
@@ -410,7 +438,7 @@ export default {
 					icon: this.participant.statusIcon || null,
 				}
 			}
-			if (this.participant.hasOwnProperty('status')) {
+			if (Object.prototype.hasOwnProperty.call(this.participant, 'status')) {
 				// We preloaded the status when via search API
 				return {
 					status: this.participant.status.status || null,

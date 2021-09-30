@@ -50,14 +50,14 @@
 				placeholder="Jane Doe"
 				:disabled="loading"
 				:aria-label="t('spreed', 'Name of the user requesting the trial')">
-			<h4>{{ t('spreed', 'E-mail of the user') }}</h4>
+			<h4>{{ t('spreed', 'Email of the user') }}</h4>
 			<input
 				v-model="hostedHPBEmail"
 				type="text"
 				name="hosted_hpb_email"
 				placeholder="jane@example.org"
 				:disabled="loading"
-				:aria-label="t('spreed', 'E-mail of the user')">
+				:aria-label="t('spreed', 'Email of the user')">
 			<h4>{{ t('spreed', 'Language') }}</h4>
 			<select
 				v-model="hostedHPBLanguage"
@@ -205,8 +205,8 @@ export default {
 		this.trialAccount = loadState('spreed', 'hosted_signaling_server_trial_data')
 
 		const languagesAndCountries = loadState('spreed', 'hosted_signaling_server_language_data')
-		this.languages = languagesAndCountries['languages'] // two lists of {code: "es", name: "Español"} - one is in 'commonlanguages' and one in 'languages'
-		this.countries = languagesAndCountries['countries'] // list of {code: "France", name: "France"}
+		this.languages = languagesAndCountries.languages // two lists of {code: "es", name: "Español"} - one is in 'commonlanguages' and one in 'languages'
+		this.countries = languagesAndCountries.countries // list of {code: "France", name: "France"}
 
 		const signaling = loadState('spreed', 'signaling_servers')
 		this.showForm = this.trialAccount.length !== 0
@@ -218,7 +218,7 @@ export default {
 			this.requestError = ''
 			this.loading = true
 			try {
-				const res = await axios.post(generateOcsUrl('apps/spreed/api/v1/hostedsignalingserver', 2) + 'requesttrial', {
+				const res = await axios.post(generateOcsUrl('apps/spreed/api/v1/hostedsignalingserver/requesttrial'), {
 					url: this.hostedHPBNextcloudUrl,
 					name: this.hostedHPBFullName,
 					email: this.hostedHPBEmail,
@@ -239,7 +239,7 @@ export default {
 			this.loading = true
 
 			try {
-				await axios.delete(generateOcsUrl('apps/spreed/api/v1/hostedsignalingserver', 2) + 'delete')
+				await axios.delete(generateOcsUrl('apps/spreed/api/v1/hostedsignalingserver/delete'))
 
 				this.trialAccount = []
 			} catch (err) {

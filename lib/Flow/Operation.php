@@ -240,6 +240,6 @@ class Operation implements IOperation {
 	 * @throws ParticipantNotFoundException
 	 */
 	protected function getParticipant(string $uid, Room $room): Participant {
-		return $room->getParticipant($uid);
+		return $room->getParticipant($uid, false);
 	}
 }

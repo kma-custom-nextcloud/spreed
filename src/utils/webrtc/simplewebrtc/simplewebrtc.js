@@ -16,14 +16,16 @@ function SimpleWebRTC(opts) {
 		localVideoEl: '',
 		remoteVideosEl: '',
 		enableDataChannels: true,
+		enableSimulcast: false,
+		maxBitrates: {
+			high: 900000,
+			medium: 300000,
+			low: 100000,
+		},
 		autoRequestMedia: false,
 		autoRemoveVideos: true,
 		adjustPeerVolume: false,
 		peerVolumeWhenSpeaking: 0.25,
-		media: {
-			video: true,
-			audio: true,
-		},
 		receiveMedia: {
 			offerToReceiveAudio: 1,
 			offerToReceiveVideo: 1,
@@ -55,7 +57,7 @@ function SimpleWebRTC(opts) {
 
 	// set our config from options
 	for (item in options) {
-		if (options.hasOwnProperty(item)) {
+		if (Object.prototype.hasOwnProperty.call(options, item)) {
 			this.config[item] = options[item]
 		}
 	}
@@ -104,6 +106,7 @@ function SimpleWebRTC(opts) {
 					sharemyscreen: message.roomType === 'screen' && !message.broadcaster,
 					broadcaster: message.roomType === 'screen' && !message.broadcaster ? self.connection.getSessionId() : null,
 					sendVideoIfAvailable: self.connection.getSendVideoIfAvailable(),
+					receiverOnly: self.connection.hasFeature('mcu'),
 				})
 				self.emit('createdPeer', peer)
 			}
@@ -123,6 +126,10 @@ function SimpleWebRTC(opts) {
 			// "nickChanged" can be received from a participant without a Peer
 			// object if that participant is not sending audio nor video.
 			self.emit('nick', { id: message.from, name: message.payload.name })
+		} else if (message.type === 'raiseHand') {
+			// "raisedHand" can be received from a participant without a Peer
+			// object if that participant is not sending audio nor video.
+			self.emit('raisedHand', { id: message.from, raised: message.payload })
 		} else if (peers.length) {
 			peers.forEach(function(peer) {
 				if (message.sid && !self.connection.hasFeature('mcu')) {
@@ -324,9 +331,9 @@ SimpleWebRTC.prototype.setVolumeForAll = function(volume) {
 	})
 }
 
-SimpleWebRTC.prototype.joinCall = function(name) {
+SimpleWebRTC.prototype.joinCall = function(name, mediaConstraints) {
 	if (this.config.autoRequestMedia) {
-		this.startLocalVideo()
+		this.startLocalVideo(mediaConstraints)
 	}
 	this.roomName = name
 	this.emit('joinedRoom', name)
@@ -340,17 +347,13 @@ SimpleWebRTC.prototype.getEl = function(idOrEl) {
 	}
 }
 
-SimpleWebRTC.prototype.startLocalVideo = function() {
+SimpleWebRTC.prototype.startLocalVideo = function(mediaConstraints) {
 	const self = this
-	const constraints = {
-		audio: true,
-		video: true,
-	}
-	this.webrtc.start(constraints, function(err, stream) {
+	this.webrtc.start(mediaConstraints, function(err, stream, actualConstraints) {
 		if (err) {
 			self.emit('localMediaError', err)
 		} else {
-			self.emit('localMediaStarted', constraints)
+			self.emit('localMediaStarted', actualConstraints)
 
 			const localVideoContainer = self.getLocalVideoContainer()
 			if (localVideoContainer) {

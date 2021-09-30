@@ -27,7 +27,10 @@
 		<Avatar v-else
 			:size="44"
 			:user="item.name"
+			:disable-menu="disableMenu"
 			:display-name="item.displayName"
+			:preloaded-user-status="preloadedUserStatus"
+			:menu-container="menuContainer"
 			menu-position="left"
 			class="conversation-icon__avatar" />
 		<div v-if="showCall"
@@ -64,9 +67,13 @@ export default {
 			type: Boolean,
 			default: true,
 		},
+		disableMenu: {
+			type: Boolean,
+			default: false,
+		},
 		item: {
 			type: Object,
-			default: function() {
+			default() {
 				return {
 					objectType: '',
 					type: 0,
@@ -100,11 +107,32 @@ export default {
 
 			return ''
 		},
+		preloadedUserStatus() {
+			if (Object.prototype.hasOwnProperty.call(this.item, 'statusMessage')) {
+				// We preloaded the status
+				return {
+					status: this.item.status || null,
+					message: this.item.statusMessage || null,
+					icon: this.item.statusIcon || null,
+				}
+			}
+			return undefined
+		},
+		menuContainer() {
+			// The store may not be defined in the RoomSelector if used from
+			// the Collaboration menu outside Talk.
+			if (!this.$store) {
+				return undefined
+			}
+
+			return this.$store.getters.getMainContainerSelector()
+		},
 	},
 }
 </script>
 
 <style lang="scss" scoped>
+@use 'sass:math';
 $icon-size: 44px;
 
 .conversation-icon {
@@ -116,7 +144,7 @@ $icon-size: 44px;
 		width: $icon-size;
 		height: $icon-size;
 		line-height: $icon-size;
-		font-size: $icon-size / 2;
+		font-size: math.div($icon-size, 2);
 		background-color: var(--color-background-darker);
 
 		&.icon-changelog {
@@ -128,7 +156,7 @@ $icon-size: 44px;
 		&.icon-password,
 		&.icon-file,
 		&.icon-mail {
-			background-size: $icon-size / 2;
+			background-size: math.div($icon-size, 2);
 		}
 	}
 

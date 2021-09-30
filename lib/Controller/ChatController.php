@@ -37,7 +37,6 @@ use OCA\Talk\Participant;
 use OCA\Talk\Room;
 use OCA\Talk\Service\ParticipantService;
 use OCA\Talk\Service\SessionService;
-use OCA\Talk\TalkSession;
 use OCP\App\IAppManager;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\DataResponse;
@@ -64,9 +63,6 @@ class ChatController extends AEnvironmentAwareController {
 
 	/** @var IUserManager */
 	private $userManager;
-
-	/** @var TalkSession */
-	private $session;
 
 	/** @var IAppManager */
 	private $appManager;
@@ -120,7 +116,6 @@ class ChatController extends AEnvironmentAwareController {
 								?string $UserId,
 								IRequest $request,
 								IUserManager $userManager,
-								TalkSession $session,
 								IAppManager $appManager,
 								ChatManager $chatManager,
 								ParticipantService $participantService,
@@ -140,7 +135,6 @@ class ChatController extends AEnvironmentAwareController {
 
 		$this->userId = $UserId;
 		$this->userManager = $userManager;
-		$this->session = $session;
 		$this->appManager = $appManager;
 		$this->chatManager = $chatManager;
 		$this->participantService = $participantService;
@@ -161,15 +155,9 @@ class ChatController extends AEnvironmentAwareController {
 	protected function getActorInfo(string $actorDisplayName = ''): array {
 		if ($this->userId === null) {
 			$actorType = Attendee::ACTOR_GUESTS;
-			$sessionId = $this->session->getSessionForRoom($this->room->getToken());
-			// The character limit for actorId is 64, but the spreed-session is
-			// 256 characters long, so it has to be hashed to get an ID that
-			// fits (except if there is no session, as the actorId should be
-			// empty in that case but sha1('') would generate a hash too
-			// instead of returning an empty string).
-			$actorId = $sessionId ? sha1($sessionId) : 'failed-to-get-session';
+			$actorId = $this->participant->getAttendee()->getActorId();
 
-			if ($sessionId && $actorDisplayName) {
+			if ($actorDisplayName) {
 				$this->guestManager->updateName($this->room, $this->participant, $actorDisplayName);
 			}
 		} else {
@@ -297,6 +285,11 @@ class ChatController extends AEnvironmentAwareController {
 		try {
 			$this->richObjectValidator->validate('{object}', ['object' => $data]);
 		} catch (InvalidObjectExeption $e) {
+			return new DataResponse([], Http::STATUS_BAD_REQUEST);
+		}
+
+		if ($data['type'] === 'geo-location'
+			&& !preg_match(ChatManager::GEO_LOCATION_VALIDATOR, $data['id'])) {
 			return new DataResponse([], Http::STATUS_BAD_REQUEST);
 		}
 
@@ -604,7 +597,43 @@ class ChatController extends AEnvironmentAwareController {
 
 		$bridge = $this->matterbridgeManager->getBridgeOfRoom($this->room);
 
-		$response = new DataResponse($data, $bridge['enabled'] ? Http::STATUS_ACCEPTED: Http::STATUS_OK);
+		$response = new DataResponse($data, $bridge['enabled'] ? Http::STATUS_ACCEPTED : Http::STATUS_OK);
+		if ($this->participant->getAttendee()->getReadPrivacy() === Participant::PRIVACY_PUBLIC) {
+			$response->addHeader('X-Chat-Last-Common-Read', $this->chatManager->getLastCommonReadMessage($this->room));
+		}
+		return $response;
+	}
+
+	/**
+	 * @NoAdminRequired
+	 * @RequireModeratorParticipant
+	 * @RequireReadWriteConversation
+	 *
+	 * @return DataResponse
+	 */
+	public function clearHistory(): DataResponse {
+		$attendee = $this->participant->getAttendee();
+		if (!$this->participant->hasModeratorPermissions(false)
+				|| $this->room->getType() === Room::ONE_TO_ONE_CALL) {
+			// Actor is not a moderator or not the owner of the message
+			return new DataResponse([], Http::STATUS_FORBIDDEN);
+		}
+
+		$systemMessageComment = $this->chatManager->clearHistory(
+			$this->room,
+			$attendee->getActorType(),
+			$attendee->getActorId()
+		);
+
+		$systemMessage = $this->messageParser->createMessage($this->room, $this->participant, $systemMessageComment, $this->l);
+		$this->messageParser->parseMessage($systemMessage);
+
+
+		$data = $systemMessage->toArray();
+
+		$bridge = $this->matterbridgeManager->getBridgeOfRoom($this->room);
+
+		$response = new DataResponse($data, $bridge['enabled'] ? Http::STATUS_ACCEPTED : Http::STATUS_OK);
 		if ($this->participant->getAttendee()->getReadPrivacy() === Participant::PRIVACY_PUBLIC) {
 			$response->addHeader('X-Chat-Last-Common-Read', $this->chatManager->getLastCommonReadMessage($this->room));
 		}

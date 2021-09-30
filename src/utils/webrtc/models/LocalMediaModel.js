@@ -63,25 +63,25 @@ export default function LocalMediaModel() {
 
 LocalMediaModel.prototype = {
 
-	get: function(key) {
+	get(key) {
 		return this.attributes[key]
 	},
 
-	set: function(key, value) {
+	set(key, value) {
 		this.attributes[key] = value
 
 		this._trigger('change:' + key, [value])
 	},
 
-	on: function(event, handler) {
-		if (!this._handlers.hasOwnProperty(event)) {
+	on(event, handler) {
+		if (!Object.prototype.hasOwnProperty.call(this._handlers, event)) {
 			this._handlers[event] = [handler]
 		} else {
 			this._handlers[event].push(handler)
 		}
 	},
 
-	off: function(event, handler) {
+	off(event, handler) {
 		const handlers = this._handlers[event]
 		if (!handlers) {
 			return
@@ -93,7 +93,7 @@ LocalMediaModel.prototype = {
 		}
 	},
 
-	_trigger: function(event, args) {
+	_trigger(event, args) {
 		let handlers = this._handlers[event]
 		if (!handlers) {
 			return
@@ -108,11 +108,11 @@ LocalMediaModel.prototype = {
 		}
 	},
 
-	getWebRtc: function() {
+	getWebRtc() {
 		return this._webRtc
 	},
 
-	setWebRtc: function(webRtc) {
+	setWebRtc(webRtc) {
 		if (this._webRtc && this._webRtc.webrtc) {
 			this._webRtc.webrtc.off('localStreamRequested', this._handleLocalStreamRequestedBound)
 			this._webRtc.webrtc.off('localStream', this._handleLocalStreamBound)
@@ -165,13 +165,13 @@ LocalMediaModel.prototype = {
 		this._webRtc.webrtc.on('localScreenStopped', this._handleLocalScreenStoppedBound)
 	},
 
-	_handleLocalStreamRequested: function(constraints, context) {
+	_handleLocalStreamRequested(constraints, context) {
 		if (context !== 'retry-no-video') {
 			this.set('localStreamRequestVideoError', null)
 		}
 	},
 
-	_handleLocalStream: function(configuration, localStream) {
+	_handleLocalStream(configuration, localStream) {
 		// Although there could be several local streams active at the same
 		// time (if the local media is started again before stopping it
 		// first) the methods to control them ("mute", "unmute",
@@ -189,7 +189,7 @@ LocalMediaModel.prototype = {
 		this._setInitialMediaState(configuration)
 	},
 
-	_handleLocalStreamRequestFailedRetryNoVideo: function(constraints, error) {
+	_handleLocalStreamRequestFailedRetryNoVideo(constraints, error) {
 		if (!error || error.name === 'NotFoundError') {
 			return
 		}
@@ -197,16 +197,16 @@ LocalMediaModel.prototype = {
 		this.set('localStreamRequestVideoError', error)
 	},
 
-	_handleLocalStreamRequestFailed: function() {
+	_handleLocalStreamRequestFailed() {
 		this.set('localStream', null)
 
 		this._setInitialMediaState({ audio: false, video: false })
 	},
 
-	_setInitialMediaState: function(configuration) {
+	_setInitialMediaState(configuration) {
 		if (configuration.audio !== false) {
 			this.set('audioAvailable', true)
-			if (!localStorage.getItem('audioDisabled_' + this.get('token')) || this.get('audioEnabled')) {
+			if (this.get('audioEnabled')) {
 				this.enableAudio()
 			} else {
 				this.disableAudio()
@@ -218,7 +218,7 @@ LocalMediaModel.prototype = {
 
 		if (configuration.video !== false) {
 			this.set('videoAvailable', true)
-			if (!localStorage.getItem('videoDisabled_' + this.get('token')) || this.get('videoEnabled')) {
+			if (this.get('videoEnabled')) {
 				this.enableVideo()
 			} else {
 				this.disableVideo()
@@ -231,14 +231,14 @@ LocalMediaModel.prototype = {
 		this.set('raisedHand', { state: false, timestamp: Date.now() })
 	},
 
-	_handleLocalStreamChanged: function(localStream) {
+	_handleLocalStreamChanged(localStream) {
 		// Only a single local stream is assumed to be active at the same time.
 		this.set('localStream', localStream)
 
 		this._updateMediaAvailability(localStream)
 	},
 
-	_updateMediaAvailability: function(localStream) {
+	_updateMediaAvailability(localStream) {
 		if (localStream && localStream.getAudioTracks().length > 0) {
 			this.set('audioAvailable', true)
 
@@ -268,15 +268,20 @@ LocalMediaModel.prototype = {
 		}
 	},
 
-	_handleLocalStreamStopped: function(localStream) {
+	_handleLocalStreamStopped(localStream) {
 		if (this.get('localStream') !== localStream) {
 			return
 		}
 
 		this.set('localStream', null)
+
+		this.set('audioEnabled', false)
+		this.set('audioAvailable', false)
+		this.set('videoEnabled', false)
+		this.set('videoAvailable', false)
 	},
 
-	_handleAudioOn: function() {
+	_handleAudioOn() {
 		if (!this.get('audioAvailable')) {
 			return
 		}
@@ -284,7 +289,7 @@ LocalMediaModel.prototype = {
 		this.set('audioEnabled', true)
 	},
 
-	_handleAudioOff: function() {
+	_handleAudioOff() {
 		if (!this.get('audioAvailable')) {
 			return
 		}
@@ -292,7 +297,7 @@ LocalMediaModel.prototype = {
 		this.set('audioEnabled', false)
 	},
 
-	_handleVolumeChange: function(currentVolume, volumeThreshold) {
+	_handleVolumeChange(currentVolume, volumeThreshold) {
 		if (!this.get('audioAvailable')) {
 			return
 		}
@@ -301,7 +306,7 @@ LocalMediaModel.prototype = {
 		this.set('volumeThreshold', volumeThreshold)
 	},
 
-	_handleSpeaking: function() {
+	_handleSpeaking() {
 		if (!this.get('audioAvailable')) {
 			return
 		}
@@ -309,7 +314,7 @@ LocalMediaModel.prototype = {
 		this.set('speaking', true)
 	},
 
-	_handleStoppedSpeaking: function() {
+	_handleStoppedSpeaking() {
 		if (!this.get('audioAvailable')) {
 			return
 		}
@@ -317,7 +322,7 @@ LocalMediaModel.prototype = {
 		this.set('speaking', false)
 	},
 
-	_handleSpeakingWhileMuted: function() {
+	_handleSpeakingWhileMuted() {
 		if (!this.get('audioAvailable')) {
 			return
 		}
@@ -325,7 +330,7 @@ LocalMediaModel.prototype = {
 		this.set('speakingWhileMuted', true)
 	},
 
-	_handleStoppedSpeakingWhileMuted: function() {
+	_handleStoppedSpeakingWhileMuted() {
 		if (!this.get('audioAvailable')) {
 			return
 		}
@@ -333,7 +338,7 @@ LocalMediaModel.prototype = {
 		this.set('speakingWhileMuted', false)
 	},
 
-	_handleVideoOn: function() {
+	_handleVideoOn() {
 		if (!this.get('videoAvailable')) {
 			return
 		}
@@ -341,7 +346,7 @@ LocalMediaModel.prototype = {
 		this.set('videoEnabled', true)
 	},
 
-	_handleVideoOff: function() {
+	_handleVideoOff() {
 		if (!this.get('videoAvailable')) {
 			return
 		}
@@ -349,15 +354,15 @@ LocalMediaModel.prototype = {
 		this.set('videoEnabled', false)
 	},
 
-	_handleLocalScreen: function(screen) {
+	_handleLocalScreen(screen) {
 		this.set('localScreen', screen)
 	},
 
-	_handleLocalScreenStopped: function() {
+	_handleLocalScreenStopped() {
 		this.set('localScreen', null)
 	},
 
-	enableAudio: function() {
+	enableAudio() {
 		if (!this._webRtc) {
 			throw new Error('WebRtc not initialized yet')
 		}
@@ -370,7 +375,7 @@ LocalMediaModel.prototype = {
 		this._webRtc.unmute()
 	},
 
-	disableAudio: function() {
+	disableAudio() {
 		if (!this._webRtc) {
 			throw new Error('WebRtc not initialized yet')
 		}
@@ -386,7 +391,7 @@ LocalMediaModel.prototype = {
 		this._webRtc.mute()
 	},
 
-	enableVideo: function() {
+	enableVideo() {
 		if (!this._webRtc) {
 			throw new Error('WebRtc not initialized yet')
 		}
@@ -399,7 +404,7 @@ LocalMediaModel.prototype = {
 		this._webRtc.resumeVideo()
 	},
 
-	disableVideo: function() {
+	disableVideo() {
 		if (!this._webRtc) {
 			throw new Error('WebRtc not initialized yet')
 		}
@@ -415,7 +420,7 @@ LocalMediaModel.prototype = {
 		this._webRtc.pauseVideo()
 	},
 
-	shareScreen: function(mode, callback) {
+	shareScreen(mode, callback) {
 		if (!this._webRtc) {
 			throw new Error('WebRtc not initialized yet')
 		}
@@ -423,7 +428,7 @@ LocalMediaModel.prototype = {
 		this._webRtc.shareScreen(mode, callback)
 	},
 
-	stopSharingScreen: function() {
+	stopSharingScreen() {
 		if (!this._webRtc) {
 			throw new Error('WebRtc not initialized yet')
 		}
@@ -436,7 +441,7 @@ LocalMediaModel.prototype = {
 	 *
 	 * @param {bool} raised true for raised, false for lowered
 	 */
-	toggleHandRaised: function(raised) {
+	toggleHandRaised(raised) {
 		if (!this._webRtc) {
 			throw new Error('WebRtc not initialized yet')
 		}

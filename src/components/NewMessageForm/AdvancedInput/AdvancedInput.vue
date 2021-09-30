@@ -29,7 +29,7 @@
 		:tab-select="true"
 		:allow-spaces="false"
 		@at="handleAtEvent">
-		<template v-slot:item="scope">
+		<template #item="scope">
 			<Avatar v-if="isMentionToAll(scope.item.id)"
 				:size="44"
 				:icon-class="'icon-group-forced-white'"
@@ -57,7 +57,7 @@
 				</em>
 			</span>
 		</template>
-		<template v-slot:embeddedItem="scope">
+		<template #embeddedItem="scope">
 			<!-- The root element itself is ignored, only its contents are taken
 			     into account. -->
 			<span>
@@ -207,7 +207,7 @@ export default {
 			required: true,
 		},
 	},
-	data: function() {
+	data() {
 		return {
 			text: '',
 			autoCompleteMentionCandidates: [],
@@ -235,20 +235,20 @@ export default {
 			}
 		},
 	},
+
 	mounted() {
-		this.focusInput()
 		/**
 		 * Listen to routeChange global events and focus on the
 		 */
-		EventBus.$on('routeChange', this.focusInput)
 		EventBus.$on('focusChatInput', this.focusInput)
 
 		this.atWhoPanelExtraClasses = 'talk candidate-mentions'
 	},
+
 	beforeDestroy() {
-		EventBus.$off('routeChange', this.focusInput)
 		EventBus.$off('focusChatInput', this.focusInput)
 	},
+
 	methods: {
 		onBlur() {
 			// requires a short delay to avoid blocking click event handlers
@@ -379,8 +379,8 @@ export default {
 
 		getGuestAvatarStyle() {
 			return {
-				'width': '44px',
-				'height': '44px',
+				width: '44px',
+				height: '44px',
 				'line-height': '44px',
 				'background-color': '#b9b9b9',
 				'text-align': 'center',
@@ -406,6 +406,8 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@use 'sass:math';
+
 @import '../../../assets/variables';
 
 .atwho-wrapper {
@@ -416,10 +418,10 @@ export default {
 	overflow: visible;
 	width: 100%;
 	border:none;
-	margin: 0 6px !important;
+	margin: 0 4px !important;
 	word-break: break-word;
 	white-space: pre-wrap;
-	padding: 8px 16px;
+	padding: 8px 16px 8px 48px;
 }
 
 // Support for the placeholder text in the div contenteditable
@@ -427,8 +429,10 @@ div[contenteditable] {
 	font-size: $chat-font-size;
 	line-height: $chat-line-height;
 	min-height: $clickable-area;
-	border-radius: $clickable-area / 2;
+	border-radius: math.div($clickable-area, 2);
 	border: 1px solid var(--color-border-dark);
+	max-height: 180px;
+	overflow-y: auto;
 	&:hover,
 	&:focus,
 	&:active {

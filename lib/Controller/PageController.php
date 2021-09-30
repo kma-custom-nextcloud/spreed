@@ -216,7 +216,7 @@ class PageController extends Controller {
 			if ($room instanceof Room && $room->hasPassword()) {
 				// If the user joined themselves or is not found, they need the password.
 				try {
-					$participant = $room->getParticipant($this->userId);
+					$participant = $room->getParticipant($this->userId, false);
 					$requirePassword = $participant->getAttendee()->getParticipantType() === Participant::USER_SELF_JOINED;
 				} catch (ParticipantNotFoundException $e) {
 					$requirePassword = true;
@@ -262,6 +262,15 @@ class PageController extends Controller {
 		$csp = new ContentSecurityPolicy();
 		$csp->addAllowedConnectDomain('*');
 		$csp->addAllowedMediaDomain('blob:');
+		$csp->addAllowedWorkerSrcDomain('blob:');
+		$csp->addAllowedWorkerSrcDomain("'self'");
+		$csp->addAllowedChildSrcDomain('blob:');
+		$csp->addAllowedChildSrcDomain("'self'");
+		$csp->addAllowedScriptDomain('blob:');
+		$csp->addAllowedScriptDomain("'self'");
+		$csp->addAllowedConnectDomain('blob:');
+		$csp->addAllowedConnectDomain("'self'");
+		$csp->addAllowedImageDomain('https://*.tile.openstreetmap.org');
 		$response->setContentSecurityPolicy($csp);
 		return $response;
 	}
@@ -314,6 +323,15 @@ class PageController extends Controller {
 		$csp = new ContentSecurityPolicy();
 		$csp->addAllowedConnectDomain('*');
 		$csp->addAllowedMediaDomain('blob:');
+		$csp->addAllowedWorkerSrcDomain('blob:');
+		$csp->addAllowedWorkerSrcDomain("'self'");
+		$csp->addAllowedChildSrcDomain('blob:');
+		$csp->addAllowedChildSrcDomain("'self'");
+		$csp->addAllowedScriptDomain('blob:');
+		$csp->addAllowedScriptDomain("'self'");
+		$csp->addAllowedConnectDomain('blob:');
+		$csp->addAllowedConnectDomain("'self'");
+		$csp->addAllowedImageDomain('https://*.tile.openstreetmap.org');
 		$response->setContentSecurityPolicy($csp);
 		return $response;
 	}

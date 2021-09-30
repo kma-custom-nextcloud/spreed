@@ -8,7 +8,7 @@
 
 * 💬 **Chat integration!** Nextcloud Talk comes with a simple text chat. Allowing you to share files from your Nextcloud and mentioning other participants.
 * 👥 **Private, group, public and password protected calls!** Just invite somebody, a whole group or send a public link to invite to a call.
-* 💻 **Screen sharing!** Share your screen with participants of your call. You just need to use Firefox version 52 (or newer), latest Edge or Chrome 49 (or newer) with this [Chrome extension](https://chrome.google.com/webstore/detail/screensharing-for-nextclo/kepnpjhambipllfmgmbapncekcmabkol).
+* 💻 **Screen sharing!** Share your screen with participants of your call. You just need to use Firefox version 66 (or newer), latest Edge or Chrome 72 (or newer, also possible using Chrome 49 with this [Chrome extension](https://chrome.google.com/webstore/detail/screensharing-for-nextclo/kepnpjhambipllfmgmbapncekcmabkol)).
 * 🚀 **Integration with other Nextcloud apps** like Files, Contacts and Deck. More to come.
 
 And in the works for the [coming versions](https://github.com/nextcloud/spreed/milestones/):
@@ -16,7 +16,7 @@ And in the works for the [coming versions](https://github.com/nextcloud/spreed/m
 
 	]]></description>
 
-	<version>11.3.2</version>
+	<version>12.2.0</version>
 	<licence>agpl</licence>
 
 	<author>Daniel Calviño Sánchez</author>
@@ -42,14 +42,14 @@ And in the works for the [coming versions](https://github.com/nextcloud/spreed/m
 	<bugs>https://github.com/nextcloud/spreed/issues</bugs>
 	<repository>https://github.com/nextcloud/spreed.git</repository>
 
-	<screenshot>https://raw.githubusercontent.com/nextcloud/spreed/master/docs/call-in-action.png</screenshot>
+	<screenshot>https://raw.githubusercontent.com/nextcloud/spreed/master/docs/call-in-action.jpg</screenshot>
 	<screenshot>https://raw.githubusercontent.com/nextcloud/spreed/master/docs/chat.png</screenshot>
 	<screenshot>https://raw.githubusercontent.com/nextcloud/spreed/master/docs/file-darg-and-drop.png</screenshot>
 	<screenshot>https://raw.githubusercontent.com/nextcloud/spreed/master/docs/screensharing.png</screenshot>
 	<screenshot>https://raw.githubusercontent.com/nextcloud/spreed/master/docs/video-verfication.png</screenshot>
 
 	<dependencies>
-		<nextcloud min-version="21" max-version="21" />
+		<nextcloud min-version="22" max-version="22" />
 	</dependencies>
 
 	<background-jobs>
@@ -68,6 +68,7 @@ And in the works for the [coming versions](https://github.com/nextcloud/spreed/m
 		<post-migration>
 			<step>OCA\Talk\Migration\CreateHelpCommand</step>
 			<step>OCA\Talk\Migration\ClearResourceAccessCache</step>
+			<step>OCA\Talk\Migration\CacheUserDisplayNames</step>
 		</post-migration>
 		<install>
 			<step>OCA\Talk\Migration\CreateHelpCommand</step>

@@ -35,14 +35,15 @@ use OCA\Talk\Events\VerifyRoomPasswordEvent;
 use OCA\Talk\Exceptions\ParticipantNotFoundException;
 use OCA\Talk\Model\Attendee;
 use OCA\Talk\Model\SelectHelper;
+use OCA\Talk\Model\Session;
 use OCA\Talk\Service\ParticipantService;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\Comments\IComment;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\EventDispatcher\IEventDispatcher;
 use OCP\IDBConnection;
+use OCP\Log\Audit\CriticalActionPerformedEvent;
 use OCP\Security\IHasher;
-use OCP\Security\ISecureRandom;
 
 class Room {
 
@@ -108,6 +109,8 @@ class Room {
 	public const EVENT_AFTER_USERS_ADD = self::class . '::postAddUsers';
 	public const EVENT_BEFORE_PARTICIPANT_TYPE_SET = self::class . '::preSetParticipantType';
 	public const EVENT_AFTER_PARTICIPANT_TYPE_SET = self::class . '::postSetParticipantType';
+	public const EVENT_BEFORE_PARTICIPANT_PUBLISHING_PERMISSIONS_SET = self::class . '::preSetParticipantPublishingPermissions';
+	public const EVENT_AFTER_PARTICIPANT_PUBLISHING_PERMISSIONS_SET = self::class . '::postSetParticipantPublishingPermissions';
 	public const EVENT_BEFORE_USER_REMOVE = self::class . '::preRemoveUser';
 	public const EVENT_AFTER_USER_REMOVE = self::class . '::postRemoveUser';
 	public const EVENT_BEFORE_PARTICIPANT_REMOVE = self::class . '::preRemoveBySession';
@@ -123,6 +126,8 @@ class Room {
 	public const EVENT_AFTER_GUESTS_CLEAN = self::class . '::postCleanGuests';
 	public const EVENT_BEFORE_SESSION_JOIN_CALL = self::class . '::preSessionJoinCall';
 	public const EVENT_AFTER_SESSION_JOIN_CALL = self::class . '::postSessionJoinCall';
+	public const EVENT_BEFORE_SESSION_UPDATE_CALL_FLAGS = self::class . '::preSessionUpdateCallFlags';
+	public const EVENT_AFTER_SESSION_UPDATE_CALL_FLAGS = self::class . '::postSessionUpdateCallFlags';
 	public const EVENT_BEFORE_SESSION_LEAVE_CALL = self::class . '::preSessionLeaveCall';
 	public const EVENT_AFTER_SESSION_LEAVE_CALL = self::class . '::postSessionLeaveCall';
 	public const EVENT_BEFORE_SIGNALING_PROPERTIES = self::class . '::beforeSignalingProperties';
@@ -133,8 +138,6 @@ class Room {
 	private $manager;
 	/** @var IDBConnection */
 	private $db;
-	/** @var ISecureRandom */
-	private $secureRandom;
 	/** @var IEventDispatcher */
 	private $dispatcher;
 	/** @var ITimeFactory */
@@ -190,7 +193,6 @@ class Room {
 
 	public function __construct(Manager $manager,
 								IDBConnection $db,
-								ISecureRandom $secureRandom,
 								IEventDispatcher $dispatcher,
 								ITimeFactory $timeFactory,
 								IHasher $hasher,
@@ -207,16 +209,15 @@ class Room {
 								string $password,
 								int $activeGuests,
 								int $callFlag,
-								\DateTime $activeSince = null,
-								\DateTime $lastActivity = null,
+								?\DateTime $activeSince,
+								?\DateTime $lastActivity,
 								int $lastMessageId,
-								IComment $lastMessage = null,
-								\DateTime $lobbyTimer = null,
-								string $objectType = '',
-								string $objectId = '') {
+								?IComment $lastMessage,
+								?\DateTime $lobbyTimer,
+								string $objectType,
+								string $objectId) {
 		$this->manager = $manager;
 		$this->db = $db;
-		$this->secureRandom = $secureRandom;
 		$this->dispatcher = $dispatcher;
 		$this->timeFactory = $timeFactory;
 		$this->hasher = $hasher;
@@ -318,6 +319,10 @@ class Room {
 		return $this->description;
 	}
 
+	/**
+	 * @deprecated Use ParticipantService::getGuestCount() instead
+	 * @return int
+	 */
 	public function getActiveGuests(): int {
 		return $this->activeGuests;
 	}
@@ -398,28 +403,47 @@ class Room {
 
 	/**
 	 * @param string|null $userId
+	 * @param string|null|false $sessionId Set to false if you don't want to load a session (and save resources),
+	 *                                     string to try loading a specific session
+	 *                                     null to try loading "any"
 	 * @return Participant
 	 * @throws ParticipantNotFoundException When the user is not a participant
 	 */
-	public function getParticipant(?string $userId): Participant {
+	public function getParticipant(?string $userId, $sessionId = null): Participant {
 		if (!is_string($userId) || $userId === '') {
 			throw new ParticipantNotFoundException('Not a user');
 		}
 
 		if ($this->currentUser === $userId && $this->participant instanceof Participant) {
-			return $this->participant;
+			if (!$sessionId
+				|| ($this->participant->getSession() instanceof Session
+					&& $this->participant->getSession()->getSessionId() === $sessionId)) {
+				return $this->participant;
+			}
 		}
 
 		$query = $this->db->getQueryBuilder();
 		$helper = new SelectHelper();
 		$helper->selectAttendeesTable($query);
-		$helper->selectSessionsTable($query);
 		$query->from('talk_attendees', 'a')
-			->leftJoin('a', 'talk_sessions', 's', $query->expr()->eq('a.id', 's.attendee_id'))
 			->where($query->expr()->eq('a.actor_type', $query->createNamedParameter(Attendee::ACTOR_USERS)))
 			->andWhere($query->expr()->eq('a.actor_id', $query->createNamedParameter($userId)))
 			->andWhere($query->expr()->eq('a.room_id', $query->createNamedParameter($this->getId())))
 			->setMaxResults(1);
+
+		if ($sessionId !== false) {
+			if ($sessionId !== null) {
+				$helper->selectSessionsTable($query);
+				$query->leftJoin('a', 'talk_sessions', 's', $query->expr()->andX(
+					$query->expr()->eq('s.session_id', $query->createNamedParameter($sessionId)),
+					$query->expr()->eq('a.id', 's.attendee_id')
+				));
+			} else {
+				$helper->selectSessionsTable($query); // FIXME PROBLEM
+				$query->leftJoin('a', 'talk_sessions', 's', $query->expr()->eq('a.id', 's.attendee_id'));
+			}
+		}
+
 		$result = $query->execute();
 		$row = $result->fetch();
 		$result->closeCursor();
@@ -475,10 +499,8 @@ class Room {
 		$query = $this->db->getQueryBuilder();
 		$helper = new SelectHelper();
 		$helper->selectAttendeesTable($query);
-		$helper->selectSessionsTable($query);
 		$query->from('talk_attendees', 'a')
-			->leftJoin('a', 'talk_sessions', 's', $query->expr()->eq('a.id', 's.attendee_id'))
-			->andWhere($query->expr()->eq('a.pin', $query->createNamedParameter($pin)))
+			->where($query->expr()->eq('a.pin', $query->createNamedParameter($pin)))
 			->andWhere($query->expr()->eq('a.room_id', $query->createNamedParameter($this->getId())))
 			->setMaxResults(1);
 		$result = $query->execute();
@@ -494,19 +516,35 @@ class Room {
 
 	/**
 	 * @param int $attendeeId
+	 * @param string|null|false $sessionId Set to false if you don't want to load a session (and save resources),
+	 *                                     string to try loading a specific session
+	 *                                     null to try loading "any"
 	 * @return Participant
 	 * @throws ParticipantNotFoundException When the pin is not valid (has no participant assigned)
 	 */
-	public function getParticipantByAttendeeId(int $attendeeId): Participant {
+	public function getParticipantByAttendeeId(int $attendeeId, $sessionId = null): Participant {
 		$query = $this->db->getQueryBuilder();
 		$helper = new SelectHelper();
 		$helper->selectAttendeesTable($query);
-		$helper->selectSessionsTable($query);
 		$query->from('talk_attendees', 'a')
-			->leftJoin('a', 'talk_sessions', 's', $query->expr()->eq('a.id', 's.attendee_id'))
-			->andWhere($query->expr()->eq('a.id', $query->createNamedParameter($attendeeId, IQueryBuilder::PARAM_INT)))
+			->where($query->expr()->eq('a.id', $query->createNamedParameter($attendeeId, IQueryBuilder::PARAM_INT)))
 			->andWhere($query->expr()->eq('a.room_id', $query->createNamedParameter($this->getId())))
 			->setMaxResults(1);
+
+		if ($sessionId !== false) {
+			if ($sessionId !== null) {
+				$helper->selectSessionsTable($query);
+				$query->leftJoin('a', 'talk_sessions', 's', $query->expr()->andX(
+					$query->expr()->eq('s.session_id', $query->createNamedParameter($sessionId)),
+					$query->expr()->eq('a.id', 's.attendee_id')
+				));
+			} else {
+				$helper->selectSessionsTableMax($query);
+				$query->groupBy('a.id');
+				$query->leftJoin('a', 'talk_sessions', 's', $query->expr()->eq('a.id', 's.attendee_id'));
+			}
+		}
+
 		$result = $query->execute();
 		$row = $result->fetch();
 		$result->closeCursor();
@@ -521,24 +559,40 @@ class Room {
 	/**
 	 * @param string $actorType
 	 * @param string $actorId
+	 * @param string|null|false $sessionId Set to false if you don't want to load a session (and save resources),
+	 *                                     string to try loading a specific session
+	 *                                     null to try loading "any"
 	 * @return Participant
 	 * @throws ParticipantNotFoundException When the pin is not valid (has no participant assigned)
 	 */
-	public function getParticipantByActor(string $actorType, string $actorId): Participant {
+	public function getParticipantByActor(string $actorType, string $actorId, $sessionId = null): Participant {
 		if ($actorType === Attendee::ACTOR_USERS) {
-			return $this->getParticipant($actorId);
+			return $this->getParticipant($actorId, $sessionId);
 		}
 
 		$query = $this->db->getQueryBuilder();
 		$helper = new SelectHelper();
 		$helper->selectAttendeesTable($query);
-		$helper->selectSessionsTable($query);
 		$query->from('talk_attendees', 'a')
-			->leftJoin('a', 'talk_sessions', 's', $query->expr()->eq('a.id', 's.attendee_id'))
 			->andWhere($query->expr()->eq('a.actor_type', $query->createNamedParameter($actorType)))
 			->andWhere($query->expr()->eq('a.actor_id', $query->createNamedParameter($actorId)))
 			->andWhere($query->expr()->eq('a.room_id', $query->createNamedParameter($this->getId())))
 			->setMaxResults(1);
+
+		if ($sessionId !== false) {
+			if ($sessionId !== null) {
+				$helper->selectSessionsTable($query);
+				$query->leftJoin('a', 'talk_sessions', 's', $query->expr()->andX(
+					$query->expr()->eq('s.session_id', $query->createNamedParameter($sessionId)),
+					$query->expr()->eq('a.id', 's.attendee_id')
+				));
+			} else {
+				$helper->selectSessionsTableMax($query);
+				$query->groupBy('a.id');
+				$query->leftJoin('a', 'talk_sessions', 's', $query->expr()->eq('a.id', 's.attendee_id'));
+			}
+		}
+
 		$result = $query->execute();
 		$row = $result->fetch();
 		$result->closeCursor();
@@ -566,6 +620,12 @@ class Room {
 		$query->execute();
 
 		$this->dispatcher->dispatch(self::EVENT_AFTER_ROOM_DELETE, $event);
+		if (class_exists(CriticalActionPerformedEvent::class)) {
+			$this->dispatcher->dispatchTyped(new CriticalActionPerformedEvent(
+				'Conversation "%s" deleted',
+				['name' => $this->getName()],
+			));
+		}
 	}
 
 	/**
@@ -720,6 +780,9 @@ class Room {
 			->set('last_message', $query->createNamedParameter((int) $message->getId()))
 			->where($query->expr()->eq('id', $query->createNamedParameter($this->getId(), IQueryBuilder::PARAM_INT)));
 		$query->execute();
+
+		$this->lastMessage = $message;
+		$this->lastMessageId = (int) $message->getId();
 	}
 
 	public function resetActiveSince(): bool {

@@ -119,7 +119,7 @@ class InjectionMiddleware extends Middleware {
 	 */
 	protected function getRoom(AEnvironmentAwareController $controller): void {
 		$token = $this->request->getParam('token');
-		$room = $this->manager->getRoomByToken($token, $this->userId);
+		$room = $this->manager->getRoomByToken($token);
 		$controller->setRoom($room);
 	}
 
@@ -130,10 +130,11 @@ class InjectionMiddleware extends Middleware {
 	 */
 	protected function getLoggedIn(AEnvironmentAwareController $controller, bool $moderatorRequired): void {
 		$token = $this->request->getParam('token');
-		$room = $this->manager->getRoomForUserByToken($token, $this->userId);
+		$sessionId = $this->talkSession->getSessionForRoom($token);
+		$room = $this->manager->getRoomForUserByToken($token, $this->userId, $sessionId);
 		$controller->setRoom($room);
 
-		$participant = $room->getParticipant($this->userId);
+		$participant = $room->getParticipant($this->userId, $sessionId);
 		$controller->setParticipant($participant);
 
 		if ($moderatorRequired && !$participant->hasModeratorPermissions(false)) {
@@ -149,11 +150,11 @@ class InjectionMiddleware extends Middleware {
 	 */
 	protected function getLoggedInOrGuest(AEnvironmentAwareController $controller, bool $moderatorRequired): void {
 		$token = $this->request->getParam('token');
-		$room = $this->manager->getRoomForUserByToken($token, $this->userId);
+		$sessionId = $this->talkSession->getSessionForRoom($token);
+		$room = $this->manager->getRoomForUserByToken($token, $this->userId, $sessionId);
 		$controller->setRoom($room);
 		$participant = null;
 
-		$sessionId = $this->talkSession->getSessionForRoom($token);
 		if ($sessionId !== null) {
 			try {
 				$participant = $room->getParticipantBySession($sessionId);

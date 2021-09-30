@@ -32,7 +32,7 @@
 <script>
 
 import ParticipantsList from '../ParticipantsList/ParticipantsList'
-import { PARTICIPANT } from '../../../../constants'
+import { ATTENDEE, PARTICIPANT } from '../../../../constants'
 import UserStatus from '../../../../mixins/userStatus'
 import Hint from '../../../Hint'
 import { subscribe, unsubscribe } from '@nextcloud/event-bus'
@@ -112,6 +112,7 @@ export default {
 
 		/**
 		 * Sort two participants by:
+		 * - participants before groups
 		 * - online status
 		 * - in call
 		 * - who raised hand first
@@ -123,31 +124,45 @@ export default {
 		 * @param {int} participant1.participantType First participant type
 		 * @param {string} participant1.sessionId First participant session
 		 * @param {string} participant1.displayName First participant display name
+		 * @param {string} participant1.status First participant user status
+		 * @param {string} participant1.actorType First participant actor type
+		 * @param {int} participant1.inCall First participant in call flag
 		 * @param {object} participant2 Second participant
 		 * @param {int} participant2.participantType Second participant type
 		 * @param {string} participant2.sessionId Second participant session
 		 * @param {string} participant2.displayName Second participant display name
+		 * @param {string} participant2.actorType Second participant actor type
+		 * @param {string} participant2.status Second participant user status
+		 * @param {int} participant2.inCall Second participant in call flag
 		 * @returns {number}
 		 */
 		sortParticipants(participant1, participant2) {
-			const session1 = participant1.sessionId
-			const session2 = participant2.sessionId
+			const p1IsGroup = participant1.actorType === ATTENDEE.ACTOR_TYPE.GROUPS
+			const p2IsGroup = participant2.actorType === ATTENDEE.ACTOR_TYPE.GROUPS
+
+			if (p1IsGroup !== p2IsGroup) {
+				// Groups below participants
+				return p2IsGroup ? -1 : 1
+			}
+
+			const hasSessions1 = !!participant1.sessionIds.length
+			const hasSessions2 = !!participant2.sessionIds.length
 			/**
 			 * For now the user status is not overwriting the online-offline status anymore
 			 * It felt too weird having users appear as offline but they are in the call or chat actively
 			if (participant1.status === 'offline') {
-				session1 = '0'
+				hasSessions1 = false
 			}
 			if (participant2.status === 'offline') {
-				session2 = '0'
+				hasSessions2 = false
 			}
 			 */
 
-			if (session1 === '0') {
-				if (session2 !== '0') {
+			if (!hasSessions1) {
+				if (hasSessions2) {
 					return 1
 				}
-			} else if (session2 === '0') {
+			} else if (!hasSessions2) {
 				return -1
 			}
 
@@ -157,8 +172,8 @@ export default {
 				return p1inCall ? -1 : 1
 			}
 
-			const p1HandRaised = this.$store.getters.getParticipantRaisedHand(session1)
-			const p2HandRaised = this.$store.getters.getParticipantRaisedHand(session2)
+			const p1HandRaised = this.$store.getters.getParticipantRaisedHand(participant1.sessionIds)
+			const p2HandRaised = this.$store.getters.getParticipantRaisedHand(participant2.sessionIds)
 			if (p1HandRaised.state !== p2HandRaised.state) {
 				return p1HandRaised.state ? -1 : 1
 			}

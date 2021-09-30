@@ -29,6 +29,7 @@ use InvalidArgumentException;
 use OCA\Talk\Exceptions\ParticipantNotFoundException;
 use OCA\Talk\Exceptions\RoomNotFoundException;
 use OCA\Talk\Manager;
+use OCA\Talk\MatterbridgeManager;
 use OCA\Talk\Model\Attendee;
 use OCA\Talk\Participant;
 use OCA\Talk\Room;
@@ -195,9 +196,13 @@ trait TRoomCommand {
 	 */
 	protected function setRoomOwner(Room $room, string $userId): void {
 		try {
-			$participant = $room->getParticipant($userId);
+			$participant = $room->getParticipant($userId, false);
 		} catch (ParticipantNotFoundException $e) {
 			throw new InvalidArgumentException(sprintf("User '%s' is no participant.", $userId));
+		}
+
+		if ($userId === MatterbridgeManager::BRIDGE_BOT_USERID) {
+			throw new InvalidArgumentException('Can not promote the bridge-bot user.');
 		}
 
 		$this->unsetRoomOwner($room);
@@ -230,21 +235,14 @@ trait TRoomCommand {
 			return;
 		}
 
-		$users = [];
 		foreach ($groupIds as $groupId) {
 			$group = $this->groupManager->get($groupId);
 			if ($group === null) {
 				throw new InvalidArgumentException(sprintf("Group '%s' not found.", $groupId));
 			}
 
-			$groupUsers = array_map(function (IUser $user) {
-				return $user->getUID();
-			}, $group->getUsers());
-
-			$users = array_merge($users, array_values($groupUsers));
+			$this->participantService->addGroup($room, $group);
 		}
-
-		$this->addRoomParticipants($room, array_unique($users));
 	}
 
 	/**
@@ -260,6 +258,10 @@ trait TRoomCommand {
 
 		$participants = [];
 		foreach ($userIds as $userId) {
+			if ($userId === MatterbridgeManager::BRIDGE_BOT_USERID) {
+				throw new InvalidArgumentException('Can not add the bridge-bot user.');
+			}
+
 			$user = $this->userManager->get($userId);
 			if ($user === null) {
 				throw new InvalidArgumentException(sprintf("User '%s' not found.", $userId));
@@ -271,7 +273,7 @@ trait TRoomCommand {
 			}
 
 			try {
-				$room->getParticipant($user->getUID());
+				$room->getParticipant($user->getUID(), false);
 
 				// nothing to do, user is a participant already
 				continue;
@@ -282,6 +284,7 @@ trait TRoomCommand {
 			$participants[] = [
 				'actorType' => Attendee::ACTOR_USERS,
 				'actorId' => $user->getUID(),
+				'displayName' => $user->getDisplayName(),
 			];
 		}
 
@@ -298,7 +301,7 @@ trait TRoomCommand {
 		$users = [];
 		foreach ($userIds as $userId) {
 			try {
-				$room->getParticipant($userId);
+				$room->getParticipant($userId, false);
 			} catch (ParticipantNotFoundException $e) {
 				throw new InvalidArgumentException(sprintf("User '%s' is no participant.", $userId));
 			}
@@ -320,8 +323,12 @@ trait TRoomCommand {
 	protected function addRoomModerators(Room $room, array $userIds): void {
 		$participants = [];
 		foreach ($userIds as $userId) {
+			if ($userId === MatterbridgeManager::BRIDGE_BOT_USERID) {
+				throw new InvalidArgumentException('Can not promote the bridge-bot user.');
+			}
+
 			try {
-				$participant = $room->getParticipant($userId);
+				$participant = $room->getParticipant($userId, false);
 			} catch (ParticipantNotFoundException $e) {
 				throw new InvalidArgumentException(sprintf("User '%s' is no participant.", $userId));
 			}
@@ -346,7 +353,7 @@ trait TRoomCommand {
 		$participants = [];
 		foreach ($userIds as $userId) {
 			try {
-				$participant = $room->getParticipant($userId);
+				$participant = $room->getParticipant($userId, false);
 			} catch (ParticipantNotFoundException $e) {
 				throw new InvalidArgumentException(sprintf("User '%s' is no participant.", $userId));
 			}
@@ -369,6 +376,9 @@ trait TRoomCommand {
 
 	protected function completeUserValues(CompletionContext $context): array {
 		return array_map(function (IUser $user) {
+			if ($user->getUID() === MatterbridgeManager::BRIDGE_BOT_USERID) {
+				return '';
+			}
 			return $user->getUID();
 		}, $this->userManager->search($context->getCurrentWord()));
 	}
@@ -405,15 +415,8 @@ trait TRoomCommand {
 			return [];
 		}
 
-		$users = [];
-		$participants = $this->participantService->getParticipantsForRoom($room);
-		foreach ($participants as $participant) {
-			if ($participant->getAttendee()->getActorType() === Attendee::ACTOR_USERS
-				&& stripos($participant->getAttendee()->getActorId(), $context->getCurrentWord()) !== false) {
-				$users[] = $participant->getAttendee()->getActorId();
-			}
-		}
-
-		return $users;
+		return array_filter($this->participantService->getParticipantUserIds($room), static function ($userId) use ($context) {
+			return stripos($userId, $context->getCurrentWord()) !== false;
+		});
 	}
 }
