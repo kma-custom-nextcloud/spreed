@@ -3,3 +3,4 @@
 3. clone `spreed` to it
 4. cd spreed
 5. make dev-setup
+6. make build-js
