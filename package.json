@@ -35,6 +35,7 @@
 		"attachmediastream": "^2.1.0",
 		"color.js": "^1.2.0",
 		"crypto-js": "^4.0.0",
+		"deasync": "^0.1.23",
 		"debounce": "^1.2.1",
 		"emoji-regex": "^9.2.2",
 		"escape-html": "^1.0.3",
