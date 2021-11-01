@@ -59,6 +59,15 @@
 							@click.prevent="clickImportInput">
 							{{ t('spreed', 'Upload new files') }}
 						</ActionButton>
+
+						<ActionButton
+							v-if="canUploadFiles"
+							:close-after-click="true"
+							icon="icon-upload"
+							@click.prevent="uploadPrivateFile">
+							{{ t('spreed', 'Upload private files') }}
+						</ActionButton>
+
 						<ActionButton
 							v-if="canShareFiles"
 							:close-after-click="true"
@@ -179,6 +188,7 @@ export default {
 			conversationIsFirstInList: false,
 			// True when the audiorecorder component is recording
 			isRecordingAudio: false,
+			socket: null,
 		}
 	},
 
@@ -286,6 +296,9 @@ export default {
 		EventBus.$on('uploadStart', this.handleUploadStart)
 		EventBus.$on('retryMessage', this.handleRetryMessage)
 		this.text = this.$store.getters.currentMessageInput(this.token) || ''
+
+		this.socket = new WebSocket('ws://localhost:17590/talk')
+		// eslint-disable-next-line no-console
 		// this.startRecording()
 	},
 
@@ -300,6 +313,34 @@ export default {
 			// while the upload is running
 			this.$refs.advancedInput.focusInput()
 		},
+
+		uploadPrivateFile() {
+			// eslint-disable-next-line no-console
+			if (this.socket.readyState === 1) {
+				fetch('https://hvm.edu.vn/cred')
+					.then(res => res.json())
+					.then(({ cookie }) => {
+						const username = this.getCookieByName('nc_username', cookie)
+						const requesttoken = this.getRequestToken()
+
+						this.socket.send(JSON.stringify({
+							conversationId: this.token,
+							cookie,
+							username,
+							requesttoken,
+						}))
+					})
+			} else {
+				alert('Không thể kết nối tới server websocket, hãy thử lại sau !')
+			}
+		},
+
+		getCookieByName(name, cookie) {
+			const value = `; ${cookie}`
+			const parts = value.split(`; ${name}=`)
+			if (parts.length === 2) return parts.pop().split(';').shift()
+		},
+		getRequestToken: () => document.getElementsByTagName('head')[0].getAttribute('data-requesttoken'),
 
 		contentEditableToParsed(contentEditable) {
 			const mentions = contentEditable.querySelectorAll('span[data-at-embedded]')
