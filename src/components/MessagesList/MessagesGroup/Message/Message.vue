@@ -148,6 +148,12 @@ the main body of the message as well as a quote.
 								{{ t('spreed', 'Copy message link') }}
 							</ActionButton>
 							<ActionButton
+								icon="icon-download"
+								:close-after-click="true"
+								@click.stop.prevent="handleDownloadFile">
+								{{ t('spreed', 'Download và giải mã') }}
+							</ActionButton>
+							<ActionButton
 								:close-after-click="true"
 								@click.stop="handleMarkAsUnread">
 								<template #icon>
@@ -418,6 +424,7 @@ export default {
 			seen: false,
 			// Shows/hides the message forwarder component
 			showForwarder: false,
+			socket: null,
 		}
 	},
 
@@ -626,6 +633,8 @@ export default {
 
 		linkToFile() {
 			if (this.isFileShare) {
+				// eslint-disable-next-line no-console
+				console.log(this.messageParameters?.file?.link)
 				return this.messageParameters?.file?.link
 			}
 			return ''
@@ -694,6 +703,8 @@ export default {
 		}
 
 		this.$refs.message.addEventListener('animationend', this.highlightAnimationStop)
+
+		this.socket = new WebSocket('ws://localhost:17590/download')
 	},
 
 	beforeDestroy() {
@@ -792,6 +803,35 @@ export default {
 			} catch (error) {
 				console.error('Error copying link: ', error)
 				showError(t('spreed', 'The link could not be copied.'))
+			}
+		},
+
+		async handleDownloadFile() {
+			if (this.socket?.readyState === 1) {
+				const getRequestToken = () => document.getElementsByTagName('head')[0].getAttribute('data-requesttoken')
+
+				const getCookieByName = (name, cookie) => {
+					const value = `; ${cookie}`
+					const parts = value.split(`; ${name}=`)
+					if (parts.length === 2) return parts.pop().split(';').shift()
+				}
+
+				fetch('https://hvm.edu.vn/cred')
+					.then(res => res.json())
+					.then(({ cookie }) => {
+						const username = getCookieByName('nc_username', cookie)
+						const requesttoken = getRequestToken()
+
+						this.socket.send(JSON.stringify({
+							location: 'Files',
+							filePath: `/${this.messageParameters?.file?.path}`,
+							cookie,
+							username,
+							requesttoken,
+						}))
+					})
+			} else {
+				alert('Không thể kết nối tới server websocket, hãy thử lại sau !')
 			}
 		},
 
