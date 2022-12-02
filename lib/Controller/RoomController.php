@@ -630,13 +630,17 @@ class RoomController extends AEnvironmentAwareController {
 				return $this->createOneToOneRoom($invite);
 			case Room::GROUP_CALL:
 				if ($invite === '') {
+
 					return $this->createEmptyRoom($roomName, false);
 				}
 				if ($source === 'circles') {
+
 					return $this->createCircleRoom($invite);
 				}
+
 				return $this->createGroupRoom($invite);
 			case Room::PUBLIC_CALL:
+
 				return $this->createEmptyRoom($roomName);
 		}
 

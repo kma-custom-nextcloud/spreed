@@ -208,10 +208,12 @@ class ChatManager {
 	 * @param string $referenceId
 	 * @return IComment
 	 */
-	public function sendMessage(Room $chat, Participant $participant, string $actorType, string $actorId, string $message, \DateTime $creationDateTime, ?IComment $replyTo, string $referenceId): IComment {
+	public function sendMessage(Room $chat, Participant $participant, string $actorType, string $actorId, string $message, \DateTime $creationDateTime, ?IComment $replyTo, string $referenceId, bool $isEncrypt): IComment {
 		$comment = $this->commentsManager->create($actorType, $actorId, 'chat', (string) $chat->getId());
 		$comment->setMessage($message, self::MAX_CHAT_LENGTH);
 		$comment->setCreationDateTime($creationDateTime);
+		$comment->setIsEncrypt(true);
+
 		// A verb ('comment', 'like'...) must be provided to be able to save a
 		// comment
 		$comment->setVerb('comment');

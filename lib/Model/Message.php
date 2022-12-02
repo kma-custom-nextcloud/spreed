@@ -66,6 +66,8 @@ class Message {
 	/** @var string */
 	protected $actorDisplayName = '';
 
+	protected $isEncrypt = false;
+
 	public function __construct(Room $room,
 								Participant $participant,
 								IComment $comment,
@@ -104,8 +106,16 @@ class Message {
 		$this->visible = $visible;
 	}
 
+	public function setIsEncrypt(bool $isEncrypt): void {
+		$this->isEncrypt = $isEncrypt;
+	}
+
 	public function getVisibility(): bool {
 		return $this->visible;
+	}
+
+	public function getIsEncrypt(): bool {
+		return $this->isEncrypt;
 	}
 
 	public function setMessage(string $message, array $parameters, string $rawMessage = ''): void {
@@ -180,6 +190,7 @@ class Message {
 			'messageType' => $this->getMessageType(),
 			'isReplyable' => $this->isReplyable(),
 			'referenceId' => (string) $this->getComment()->getReferenceId(),
+			'isEncrypt' => $this->getIsEncrypt(),
 		];
 
 		if ($this->getMessageType() === 'comment_deleted') {

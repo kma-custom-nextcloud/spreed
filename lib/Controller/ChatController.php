@@ -239,7 +239,7 @@ class ChatController extends AEnvironmentAwareController {
 		$creationDateTime = $this->timeFactory->getDateTime('now', new \DateTimeZone('UTC'));
 
 		try {
-			$comment = $this->chatManager->sendMessage($this->room, $this->participant, $actorType, $actorId, $message, $creationDateTime, $parent, $referenceId);
+			$comment = $this->chatManager->sendMessage($this->room, $this->participant, $actorType, $actorId, $message, $creationDateTime, $parent, $referenceId, true);
 		} catch (MessageTooLongException $e) {
 			return new DataResponse([], Http::STATUS_REQUEST_ENTITY_TOO_LARGE);
 		} catch (\Exception $e) {
@@ -416,6 +416,7 @@ class ChatController extends AEnvironmentAwareController {
 		 */
 
 		$attendee = $this->participant->getAttendee();
+
 		if ($lookIntoFuture && $setReadMarker === 1 &&
 			$lastKnownMessageId > $attendee->getLastReadMessage()) {
 			$this->participantService->updateLastReadMessage($this->participant, $lastKnownMessageId);
