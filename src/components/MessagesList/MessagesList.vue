@@ -39,16 +39,20 @@ get the messagesList array and loop through the list to generate the messages.
 			<div
 				class="icon-loading" />
 		</div>
-		<MessagesGroup
-			v-for="(item, index) of messagesGroupedByAuthor"
-			:key="item[0].id"
-			:style="{ height: item.height + 'px' }"
-			v-bind="item"
-			:last-read-message-id="visualLastReadMessageId"
-			:messages="item"
-			:next-message-id="(messagesGroupedByAuthor[index + 1] && messagesGroupedByAuthor[index + 1][0].id) || 0"
-			:previous-message-id="(index > 0 && messagesGroupedByAuthor[index - 1][messagesGroupedByAuthor[index - 1].length - 1].id) || 0" />
-		<template v-if="!messagesGroupedByAuthor.length">
+
+		<div v-if="isConnectSocketDecrypt">
+			<MessagesGroup
+				v-for="(item, index) of messagesGroupedByAuthor"
+				:key="item[0].id"
+				:style="{ height: item.height + 'px' }"
+				v-bind="item"
+				:last-read-message-id="visualLastReadMessageId"
+				:messages="item"
+				:next-message-id="(messagesGroupedByAuthor[index + 1] && messagesGroupedByAuthor[index + 1][0].id) || 0"
+				:previous-message-id="(index > 0 && messagesGroupedByAuthor[index - 1][messagesGroupedByAuthor[index - 1].length - 1].id) || 0" />
+		</div>
+
+		<template v-if="!messagesGroupedByAuthor.length || !isConnectSocketDecrypt">
 			<LoadingPlaceholder
 				type="messages"
 				:count="15" />
@@ -132,6 +136,14 @@ export default {
 			loadingOldMessages: false,
 
 			destroying: false,
+
+			socketDecryptMessage: null,
+
+			listMessagesDecoded: [],
+
+			encryptMessageObject: {},
+
+			isConnectSocketDecrypt: false,
 		}
 	},
 
@@ -171,7 +183,7 @@ export default {
 		messagesGroupedByAuthor() {
 			const groups = []
 			let lastMessage = null
-			for (const message of this.messagesList) {
+			for (const message of this.listMessagesDecoded) {
 				if (message.systemMessage === 'message_deleted') {
 					continue
 				}
@@ -254,6 +266,15 @@ export default {
 				this.handleStartGettingMessagesPreconditions()
 			},
 		},
+		messagesList() {
+			const conversation = this.$store.getters.conversationsList.find((conversation) => conversation.token === this.token)
+
+			if (conversation && conversation.name.indexOf('E-') === 0) {
+				this.sendMessageToDecrypt()
+			} else {
+				this.listMessagesDecoded = this.messagesList
+			}
+		},
 	},
 
 	mounted() {
@@ -266,6 +287,36 @@ export default {
 		subscribe('networkOffline', this.handleNetworkOffline)
 		subscribe('networkOnline', this.handleNetworkOnline)
 		window.addEventListener('focus', this.onWindowFocus)
+
+		this.socketDecryptMessage = new WebSocket('ws://localhost:17590/decryptMessage')
+
+		this.socketDecryptMessage.addEventListener('open', (event) => {
+			this.isConnectSocketDecrypt = true
+
+			const conversation = this.$store.getters.conversationsList.find((conversation) => conversation.token === this.token)
+
+			if (conversation && conversation.name.indexOf('E-') === 0) {
+				this.sendMessageToDecrypt()
+			}
+		})
+
+		this.socketDecryptMessage.addEventListener('message', (event) => {
+			const listMessagesTemp = [...this.messagesList]
+
+			const responseMessageDecoded = JSON.parse(event.data.toString())
+			let i = 0
+
+			this.listMessagesDecoded = listMessagesTemp.map((message, index) => {
+				let messageTemp = { ...message }
+
+				if (this.encryptMessageObject[index]) {
+				  messageTemp = { ...message, message: responseMessageDecoded[i] }
+					i++
+				}
+
+				return messageTemp
+			})
+		})
 	},
 
 	beforeDestroy() {
@@ -325,6 +376,25 @@ export default {
 			}
 
 			return !this.messagesHaveDifferentDate(message1, message2) // Posted on the same day
+		},
+
+		sendMessageToDecrypt() {
+			const messages = this.$store.getters.messagesList(this.token)
+
+			this.encryptMessageObject = {}
+
+			messages?.forEach((message, index) => {
+				if (message.messageType === 'comment') {
+					this.encryptMessageObject[index] = message.message
+				}
+			})
+
+			if (this.socketDecryptMessage.readyState === 1) {
+				this.socketDecryptMessage.send(JSON.stringify({
+					messages: Object.values(this.encryptMessageObject),
+					userId: this.$store.getters.getUserId(),
+				}))
+			}
 		},
 
 		/**

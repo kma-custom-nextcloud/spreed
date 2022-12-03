@@ -127,10 +127,7 @@
 					:aria-label="t('spreed', 'Send message')"
 					class="nc-button nc-button__main new-message-form__send-button"
 					@click.prevent="handleSubmit">
-					<Send
-						title=""
-						:size="16"
-						decorative />
+					{{ isPrivateRoom ? "Send Private message" : "Send Message" }}
 				</button>
 			</form>
 		</div>
@@ -150,7 +147,6 @@ import { shareFile } from '../../services/filesSharingServices'
 import { CONVERSATION } from '../../constants'
 import Paperclip from 'vue-material-design-icons/Paperclip'
 import EmoticonOutline from 'vue-material-design-icons/EmoticonOutline'
-import Send from 'vue-material-design-icons/Send'
 import AudioRecorder from './AudioRecorder/AudioRecorder'
 
 const picker = getFilePickerBuilder(t('spreed', 'File to share'))
@@ -170,7 +166,6 @@ export default {
 		Paperclip,
 		EmojiPicker,
 		EmoticonOutline,
-		Send,
 		AudioRecorder,
 	},
 
@@ -189,6 +184,7 @@ export default {
 			// True when the audiorecorder component is recording
 			isRecordingAudio: false,
 			socket: null,
+			socketEncryptMessage: null,
 		}
 	},
 
@@ -200,6 +196,16 @@ export default {
 		 */
 		token() {
 			return this.$store.getters.getToken()
+		},
+
+		isPrivateRoom() {
+			const conversation = this.$store.getters.conversationsList.find((conversation) => conversation.token === this.token)
+
+			if (conversation && conversation.name.indexOf('E-') === 0) {
+				return true
+			}
+
+			return false
 		},
 
 		conversation() {
@@ -298,7 +304,13 @@ export default {
 		this.text = this.$store.getters.currentMessageInput(this.token) || ''
 
 		this.socket = new WebSocket('ws://localhost:17590/talk')
-		// eslint-disable-next-line no-console
+		this.socketEncryptMessage = new WebSocket('ws://localhost:17590/encryptMessage')
+
+		this.socketEncryptMessage.addEventListener('message', (event) => {
+			this.parsedText = event.data
+			this.handleSendMessage()
+		})
+
 		// this.startRecording()
 	},
 
@@ -392,7 +404,23 @@ export default {
 		/**
 		 * Sends the new message
 		 */
-		async handleSubmit() {
+		handleSubmit() {
+			if (this.isPrivateRoom) {
+				if (this.socketEncryptMessage.readyState === 1) {
+					this.socketEncryptMessage.send(JSON.stringify({
+						conversationId: this.token,
+						message: this.parsedText,
+					}))
+				} else {
+					alert('Không thể kết nối tới server websocket, hãy thử lại sau !')
+				}
+			} else {
+				this.handleSendMessage()
+			}
+
+		},
+
+		async handleSendMessage() {
 			if (this.parsedText !== '') {
 				const temporaryMessage = await this.$store.dispatch('createTemporaryMessage', { text: this.parsedText, token: this.token })
 				// FIXME: move "addTemporaryMessage" into "postNewMessage" as it's a pre-requisite anyway ?
@@ -590,6 +618,11 @@ export default {
 			opacity: $opacity_full;
 			// good looking on dark AND white bg
 			background-color: $icon-focus-bg;
+		}
+
+		&__send-button {
+			width: 100px;
+			padding: 0 6px;
 		}
 
 	}
