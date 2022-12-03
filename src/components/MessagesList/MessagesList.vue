@@ -40,7 +40,7 @@ get the messagesList array and loop through the list to generate the messages.
 				class="icon-loading" />
 		</div>
 
-		<div v-if="isConnectSocketDecrypt">
+		<div v-if="(isConnectSocketDecrypt && isPrivateRoom) || !isPrivateRoom">
 			<MessagesGroup
 				v-for="(item, index) of messagesGroupedByAuthor"
 				:key="item[0].id"
@@ -52,7 +52,7 @@ get the messagesList array and loop through the list to generate the messages.
 				:previous-message-id="(index > 0 && messagesGroupedByAuthor[index - 1][messagesGroupedByAuthor[index - 1].length - 1].id) || 0" />
 		</div>
 
-		<template v-if="!messagesGroupedByAuthor.length || !isConnectSocketDecrypt">
+		<template v-if="!messagesGroupedByAuthor.length || (!isConnectSocketDecrypt && isPrivateRoom)">
 			<LoadingPlaceholder
 				type="messages"
 				:count="15" />
@@ -150,6 +150,16 @@ export default {
 	computed: {
 		isWindowVisible() {
 			return this.$store.getters.windowIsVisible() && this.isVisible
+		},
+
+		isPrivateRoom() {
+			const conversation = this.$store.getters.conversationsList.find((conversation) => conversation.token === this.token)
+
+			if (conversation && conversation.name.indexOf('E-') === 0) {
+				return true
+			}
+
+			return false
 		},
 
 		visualLastReadMessageId() {
@@ -267,9 +277,7 @@ export default {
 			},
 		},
 		messagesList() {
-			const conversation = this.$store.getters.conversationsList.find((conversation) => conversation.token === this.token)
-
-			if (conversation && conversation.name.indexOf('E-') === 0) {
+			if (this.isPrivateRoom) {
 				this.sendMessageToDecrypt()
 			} else {
 				this.listMessagesDecoded = this.messagesList
@@ -293,9 +301,7 @@ export default {
 		this.socketDecryptMessage.addEventListener('open', (event) => {
 			this.isConnectSocketDecrypt = true
 
-			const conversation = this.$store.getters.conversationsList.find((conversation) => conversation.token === this.token)
-
-			if (conversation && conversation.name.indexOf('E-') === 0) {
+			if (this.isPrivateRoom) {
 				this.sendMessageToDecrypt()
 			}
 		})
